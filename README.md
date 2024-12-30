@@ -1,12 +1,20 @@
-## 基于huggingface大模型微调+RLHF+RAG的旅游路径规划智能体
+## 基于Qwen2.5+LoRA微调+RLHF+RAG的旅游路径规划智能体
 
 ## 实验报告
 有 实验报告.pdf 可供了解。
 请注意：报告中仅描述了该项目的早期版本，很多重要模块都没加
 
 ## 环境配置
+**GPU**: RTX3090 $\times$ 2
+**Platform**: AutoDL
+- NAME="Ubuntu"
+- VERSION="20.04.4 LTS (Focal Fossa)"
+- CUDA=12.4
+- Pytorch=2.5.0
 
-
+```shell
+pip install -r requirements.txt
+```
 
 
 ## 如何运行
