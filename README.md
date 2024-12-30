@@ -20,7 +20,7 @@ python rag_naive.py
 ```
 
 ## Travel Agent运行结果
-![image](/root/autodl-tmp/Travel-Agent-based-on-LLM-and-SFT/image/Snipaste_2024-12-30_20-16-28.png)
+![image](image/Snipaste_2024-12-30_20-16-28.png)
 
 
 
