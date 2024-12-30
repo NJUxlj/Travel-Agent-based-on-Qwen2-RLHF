@@ -121,7 +121,7 @@ class TravelAgent:
     def generate_response(
         self,
         prompt:str,
-        max_length: int = 1024,
+        max_length: int = 2048,
         temperature: float = 0.7,
         top_p: float = 0.9
     ) -> str:

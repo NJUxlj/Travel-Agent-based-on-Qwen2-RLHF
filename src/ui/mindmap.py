@@ -29,7 +29,7 @@ def check_graphviz_installed():
 
 
 
-def clean_text(text: str) -> str:  
+def clean_text(text: str, truncate_length: int = 100) -> str:  
     """  
     清理文本，移除或替换可能导致graphviz语法错误的字符  
     """  
@@ -38,10 +38,16 @@ def clean_text(text: str) -> str:
     # 确保文本不为空  
     text = text.strip() or "node"  
     # 限制文本长度  
-    return text[:50]  
+    return text[:truncate_length]  
 
 class MindMapGenerator:
-    def __init__(self, model_name: str = model_path):
+    def __init__(
+        self, 
+        model_name: str = model_path,
+        level_num:int=3, 
+        item_num:int=15, 
+        max_new_tokens:int=1024
+        ):
         """
         初始化思维导图生成器
         Args:
@@ -54,7 +60,11 @@ class MindMapGenerator:
             device_map="auto"
         )
         
-    def generate_mindmap_content(self, topic: str) -> str:
+        self.level_num = level_num
+        self.item_num = item_num
+        self.max_new_tokens = max_new_tokens
+        
+    def generate_mindmap_content(self, topic: str,) -> str:
         """
         使用大模型生成思维导图内容
         Args:
@@ -62,12 +72,13 @@ class MindMapGenerator:
         Returns:
             生成的思维导图内容（层级列表格式）
         """
-        prompt = f"""Please create a detailed mind map about "{topic}". 
+        prompt = f"""Please create a detailed mind map using the content: "{topic}". 
         The output should be in a hierarchical format with main topics and subtopics.
         Format the output as a list with proper indentation using - for each level.
-        Keep it concise but informative. Generate no more than 3 levels and 12 total items.
+        Keep it concise but informative. Generate no more than {self.level_num} levels and {self.item_num} total items. 
         
         Example format:
+        \n\n
         - Main Topic
           - Subtopic 1
             - Detail 1
@@ -75,12 +86,14 @@ class MindMapGenerator:
           - Subtopic 2
             - Detail 3
             - Detail 4
+            
+        Here is your mindmap:
         """
         
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
         outputs = self.model.generate(
             **inputs,
-            max_new_tokens=500,
+            max_new_tokens=self.max_new_tokens,
             temperature=0.7,
             top_p=0.9,
             do_sample=True,
@@ -88,8 +101,15 @@ class MindMapGenerator:
         )
         
         response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        response = response[len(prompt):]
+        
+        print("response:", response)
         # 提取生成的列表部分
-        content = response.split("\n\n")[-1]
+        # content = response.split("\n\n")[-1]
+        # 使用正则表达式提取最后一个包含层级列表的部分  
+        pattern = r'(?:^|\n)(-\s+[^\n]+(?:\n\s+-\s+[^\n]+)*)'  
+        matches = re.finditer(pattern, response, re.MULTILINE)  
+        content = list(matches)[-1].group(0) if matches else f"- {topic}\n  - Generation failed"  
         return content
 
     def parse_hierarchy(self, content: str) -> List[tuple]:
@@ -102,7 +122,7 @@ class MindMapGenerator:
         """
         lines = content.strip().split('\n')
         nodes = []
-        previous_nodes = [''] * 10  # 存储每个层级的前一个节点
+        previous_nodes = [''] * self.item_num  # 存储每个层级的前一个节点
         
         for line in lines:
             # 计算缩进级别
@@ -116,6 +136,12 @@ class MindMapGenerator:
                 parent = previous_nodes[indent_level - 1]
                 nodes.append((parent, text, indent_level))
             
+            if indent_level >= len(previous_nodes):
+                tmp_nodes = ['']*2*indent_level
+                for idx, node in enumerate(previous_nodes):
+                    tmp_nodes[idx] = node
+                previous_nodes = tmp_nodes
+                
             previous_nodes[indent_level] = text
             
         return nodes
@@ -210,7 +236,7 @@ def generate_mindmap(topic: str) -> str:
     Returns:
         生成的思维导图图片路径
     """
-    generator = MindMapGenerator()
+    generator = MindMapGenerator(max_new_tokens=1024)
     content = generator.generate_mindmap_content(topic)
     nodes = generator.parse_hierarchy(content)
     image_path = generator.create_mindmap(topic, nodes)
