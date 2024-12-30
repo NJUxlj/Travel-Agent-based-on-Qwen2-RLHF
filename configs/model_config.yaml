@@ -1,0 +1,63 @@
+
+# 基础模型配置
+model:
+  # 模型名称或路径
+  name: "/root/autodl-tmp/models/Qwen2.5-1.5B"  
+  # 模型类型
+  model_type: "causal_lm"
+  # 是否使用混合精度训练
+  use_fp16: true
+  # 是否使用CPU还是GPU
+  device: "cuda"  # 或 "cpu"
+  # 模型最大输入长度
+  max_length: 2048
+  # 是否使用梯度检查点来节省显存
+  gradient_checkpointing: true
+
+model2:
+  # 模型名称或路径
+  name: "/root/autodl-tmp/models/Qwen2.5-3B"  
+  # 模型类型
+  model_type: "causal_lm"
+  # 是否使用混合精度训练
+  use_fp16: true
+  # 是否使用CPU还是GPU
+  device: "cuda"  # 或 "cpu"
+  # 模型最大输入长度
+  max_length: 2048
+  # 是否使用梯度检查点来节省显存
+  gradient_checkpointing: true
+
+# LoRA配置
+lora:
+  # LoRA秩，越大效果越好但参数量越大
+  r: 8
+  # 缩放参数
+  lora_alpha: 32
+  # dropout概率
+  lora_dropout: 0.1
+  # 需要应用LoRA的模块名称
+  target_modules: 
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+  # 偏置项处理方式
+  bias: "none"  # 可选: "none", "all", "lora_only"
+
+# Tokenizer配置
+tokenizer:
+  # 是否使用快速tokenizer
+  use_fast: true
+  # 填充token的ID
+  pad_token: "<|endoftext|>"
+  # 额外的特殊token
+  additional_special_tokens:
+    - "<|system|>"
+    - "<|user|>"
+    - "<|assistant|>"
+  # 是否左侧填充
+  padding_side: "left"
+  # 是否截断过长序列
+  truncation: true
+
