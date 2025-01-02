@@ -223,7 +223,7 @@ class SFTTrainer:
 
 if __name__ == "__main__":
     args = parse_args()  # 使用parse_args获取参数
-    trainer = SFTTrainer(args)
+    trainer = SFTTrainer(args = args)
     
     processor = DataProcessor(
         tokenizer=trainer.tokenizer,
@@ -231,5 +231,6 @@ if __name__ == "__main__":
         system_prompt=None  
     )
     
-    processor.process
+    
+    processor.process_crosswoz_data("/root/autodl-tmp/Travel-Agent-based-on-LLM-and-SFT/data/raw/crosswoz/train.json")
     # trainer.train()

@@ -255,7 +255,9 @@ class DataProcessor:
                 })  
 
         # 保存处理后的数据  
-        with open('processed_crosswoz.json', 'w', encoding='utf-8') as f:  
+        store_path = '.\processed_data\processed_crosswoz.json'
+        print("处理后的数据集的保存路径是：",store_path)
+        with open(store_path, 'w', encoding='utf-8') as f:  
             json.dump(formatted_data, f, ensure_ascii=False, indent=2) 
         
         print("已保存处理后的数据集CrossWOZ 到 processed_crosswoz.json ~~~")
