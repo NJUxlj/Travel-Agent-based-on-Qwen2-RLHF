@@ -6,9 +6,11 @@ def load_config(config_path: str) -> dict:
         return yaml.safe_load(f)  
 
 # 加载配置  
-MODEL_CONFIG = load_config('configs/model_config.yaml')  
-TRAIN_CONFIG = load_config('configs/train_config.yaml')  
-DPO_CONFIG = load_config('configs/dpo_config.yaml')
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+MODEL_CONFIG = load_config(BASE_DIR / 'configs' / 'model_config.yaml')  
+TRAIN_CONFIG = load_config(BASE_DIR / 'configs' / 'train_config.yaml')  
+DPO_CONFIG = load_config(BASE_DIR / 'configs' / 'dpo_config.yaml')
 
 
 
