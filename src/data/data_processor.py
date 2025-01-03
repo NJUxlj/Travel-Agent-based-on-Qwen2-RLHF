@@ -64,6 +64,7 @@ class DataProcessor:
         self,
         dataset_name: str,
         split: str = None,
+        num_examples: Optional[int] = 2000,
         use_auth_token: Optional[str] = None,
         cache_dir: Optional[str] = None,
     ) -> Dataset:
@@ -82,6 +83,12 @@ class DataProcessor:
             use_auth_token=use_auth_token,
             cache_dir=cache_dir,
         )
+        
+        if split == None:
+            dataset = {s: ds.select(range(min(num_examples, len(ds)))) for s, ds in dataset.items()}
+        else:
+            dataset = dataset.select(range(min(num_examples, len(dataset))))
+            
         self.logger.info(f"Loaded dataset {dataset_name} with {len(dataset)} samples, split = {split}")
         return dataset
 
@@ -338,9 +345,13 @@ class DataProcessor:
             dataset[split] = dataset[split].map(
                 self._tokenize_function,
                 batched=True,
+                batch_size=32,
+                num_proc=2,
                 remove_columns=dataset[split].column_names,
                 desc=f"Tokenizing texts for {split} of dataset {data_path}"
             )
+            
+        # 将分词结果保存在本地，以便下次复用
         
         
         
