@@ -66,7 +66,7 @@ class TravelAgent:
             self.model_name,  
             trust_remote_code=True,
             torch_dtype=torch.float16,  
-            device_map=self.device_map
+            # device_map=self.device_map  # 并行训练时， 不能使用自动设备映射
         )  
         
         # 应用LoRA配置  

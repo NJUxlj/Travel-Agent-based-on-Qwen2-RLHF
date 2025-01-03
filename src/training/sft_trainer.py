@@ -25,7 +25,7 @@ from utils import (
     get_max_length_from_model,
 )
 
-from data.data_processor import DataProcessor
+from data.data_processor import DataProcessor, CrossWOZProcessor
 
 
 
@@ -93,6 +93,7 @@ class SFTTrainer:
             gradient_accumulation_steps=8,  
             learning_rate=2e-4,  
             weight_decay=0.01,  
+            warmup_steps=100,
             warmup_ratio=0.03,  
             lr_scheduler_type="cosine",  
             fp16=True,  
@@ -225,12 +226,20 @@ if __name__ == "__main__":
     args = parse_args()  # 使用parse_args获取参数
     trainer = SFTTrainer(args = args)
     
-    processor = DataProcessor(
+    processor = CrossWOZProcessor(
         tokenizer=trainer.tokenizer,
         max_length = trainer.max_length,
         system_prompt=None  
     )
     
     
-    processor.process_crosswoz_data("/root/autodl-tmp/Travel-Agent-based-on-LLM-and-SFT/data/raw/crosswoz/train.json")
-    # trainer.train()
+    data_path = "/root/autodl-tmp/Travel-Agent-based-on-LLM-and-SFT/data/processed/crosswoz_sft"
+    processed_data = processor.process_conversation_data_huggingface(data_path)
+    
+    
+    trainer.train(
+        train_dataset=processed_data["train"],
+        eval_dataset=processed_data["test"]
+    )
+    
+    

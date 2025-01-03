@@ -315,6 +315,9 @@ def get_max_length_from_model(model):
     model: 既可以base model， 也可以是特定任务model
     
     """  
+    if isinstance(model,str):
+        model = AutoModel.from_pretrained(model)
+    
     # 处理被Accelerator(DDP)包装的模型  
     if hasattr(model, "module"):  
         print("This model is wrapped by Accelerator(DDP), we use model.module")  
