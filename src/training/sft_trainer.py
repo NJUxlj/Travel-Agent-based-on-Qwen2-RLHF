@@ -9,6 +9,7 @@ from transformers import (
     TrainingArguments,
     default_data_collator,
     DataCollatorForLanguageModeling,  
+    DataCollatorForSeq2Seq,
     AutoModelForCausalLM,
     AutoTokenizer
 )
@@ -18,15 +19,16 @@ from peft import PeftModel
 import sys
 sys.path.append("../../")  # 添加上级目录的上级目录到sys.path
 sys.path.append("../")
-from configs.config import MODEL_CONFIG
+from configs.config import MODEL_CONFIG, BATCH_SIZE
 from models.model import TravelAgent
 from utils import (
     parse_args,
     get_max_length_from_model,
+    check_deepspeed_env
 )
 
 from data.data_processor import DataProcessor, CrossWOZProcessor
-
+from contextlib import contextmanager
 
 
 MODEL_PATH = "/root/autodl-tmp/models/Qwen2.5-1.5B"
@@ -40,7 +42,35 @@ python sft_trainer.py \
 --device_map "auto"
 
 
+deepspeed --num_gpus=2 sft_trainer.py \
+--deepspeed ds_config.json \
+--model_name "/root/autodl-tmp/models/Qwen2.5-1.5B" \
+--output_dir "output" \
+--device "cuda" \
+--device_map "auto"
+
 '''
+
+class CustomTrainer(Trainer):  
+    @contextmanager  
+    def compute_loss_context_manager(self):  
+        """  
+        重写这个方法以禁用 no_sync 上下文管理器  
+        """  
+        if self.args.gradient_accumulation_steps > 1:  
+            if self.deepspeed:  
+                # 对于 deepspeed，我们直接返回一个空的上下文管理器  
+                yield  
+            else:  
+                # 对于非 deepspeed，保持原有行为  
+                if self.model.is_gradient_checkpointing:  
+                    # 如果使用了梯度检查点，不要使用 no_sync  
+                    yield  
+                else:  
+                    with self.model.no_sync():  
+                        yield  
+        else:  
+            yield  
 
 class SFTTrainer:
     """
@@ -64,11 +94,22 @@ class SFTTrainer:
             output_dir: 输出目录
             training_args: 训练参数
         """
+        if check_deepspeed_env():
+            pass
+        else:
+            raise ValueError("DeepSpeed is not installed or not configured correctly.")
+        
         
         self.model_name = args.model_name
         self.output_dir = args.output_dir
         self.device = args.device
         self.device_map = args.device_map
+        self.local_rank = args.local_rank
+        
+        if self.local_rank!=-1:
+            self.device = torch.device("cuda", self.local_rank)
+        else:
+            self.device = args.device
         
         # 加载模型和分词器 # 添加LoRA
         self.agent=TravelAgent(
@@ -78,19 +119,24 @@ class SFTTrainer:
             lora_config=lora_config
         )
         
-        
         self.model = self.agent.model
         self.max_length = get_max_length_from_model(self.model)
         self.tokenizer = self.agent.tokenizer
         
+        '''
+        无论选择哪种方案，确保：
+            DeepSpeed的train_batch_size等于实际的总batch size
+            DeepSpeed的train_micro_batch_size_per_gpu与TrainingArguments的per_device_train_batch_size相等
+            所有数值满足：total_batch = micro_batch * num_gpus * grad_accum
+        '''
 
         # 设置默认训练参数
         default_training_args = TrainingArguments(  
             output_dir=self.output_dir,  
             num_train_epochs=3,  
-            per_device_train_batch_size=2,  
-            per_device_eval_batch_size=2,  
-            gradient_accumulation_steps=8,  
+            per_device_train_batch_size=1,  # 每个GPU上的batch size
+            per_device_eval_batch_size=1,  
+            gradient_accumulation_steps=32,  
             learning_rate=2e-4,  
             weight_decay=0.01,  
             warmup_steps=100,
@@ -135,13 +181,17 @@ class SFTTrainer:
         """
         
         # 数据整理器  
-        data_collator = DataCollatorForLanguageModeling(  
+        data_collator = DataCollatorForSeq2Seq(  
             tokenizer=self.tokenizer,  
-            mlm=False  
+            model=self.model,
+            max_length=self.max_length,
+            padding="max_length",
+            return_tensors="pt",
+            # mlm=False  
         )  
         
         # 创建训练器
-        trainer = Trainer(
+        trainer = CustomTrainer(
             model=self.model,
             args=self.training_args,
             train_dataset=train_dataset,
@@ -160,9 +210,10 @@ class SFTTrainer:
         # 开始训练
         trainer.train(resume_from_checkpoint=resume_from_checkpoint)
         
-        # 保存模型
-        trainer.save_model()
-        self.tokenizer.save_pretrained(self.output_dir)
+        # 只在主进程保存模型  
+        if args.local_rank in [-1, 0]:  
+            trainer.save_model()
+            self.tokenizer.save_pretrained(self.output_dir)
         
         return trainer
     

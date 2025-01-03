@@ -14,6 +14,10 @@ DPO_CONFIG = load_config(BASE_DIR / 'configs' / 'dpo_config.yaml')
 
 
 
+BATCH_SIZE = 32
+NUM_PROCESSES = 2
+
+
 
 # # 在代码中使用配置  
 # model = TravelAgent(  

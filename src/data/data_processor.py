@@ -38,6 +38,8 @@ from utils import (
     get_max_length_from_model,
 )
 
+from configs.config import BATCH_SIZE
+
 class DataProcessor:
     """
     处理旅行对话数据的类，支持普通对话数据和DPO偏好数据的处理
@@ -209,9 +211,6 @@ class DataProcessor:
             当标签为-100时，这些位置的预测不会参与损失计算
             '''
             
-            # 只将padding tokens的label设为-100  
-            labels[attention_mask == 0] = -100   
-            
             result["input_ids"].append(input_ids)  
             result["attention_mask"].append(attention_mask)  
             result["labels"].append(labels)  
@@ -337,6 +336,7 @@ class DataProcessor:
             dataset[split] = dataset[split].map(
                 lambda x: self._format_conversation(x),
                 batched=True,
+                batch_size=BATCH_SIZE,
                 remove_columns=dataset[split].column_names,
                 desc=f"Formatting conversations for {split} of dataset {data_path}"
             )
@@ -345,7 +345,7 @@ class DataProcessor:
             dataset[split] = dataset[split].map(
                 self._tokenize_function,
                 batched=True,
-                batch_size=32,
+                batch_size=BATCH_SIZE,
                 num_proc=2,
                 remove_columns=dataset[split].column_names,
                 desc=f"Tokenizing texts for {split} of dataset {data_path}"

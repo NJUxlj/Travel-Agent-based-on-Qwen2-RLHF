@@ -55,7 +55,7 @@ class TravelAgent:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         
-        self.model = self._init_model()
+        self.model = self._init_model().to(self.device)
         
         
     
@@ -67,7 +67,7 @@ class TravelAgent:
             trust_remote_code=True,
             torch_dtype=torch.float16,  
             # device_map=self.device_map  # 并行训练时， 不能使用自动设备映射
-        )  
+        )
         
         # 应用LoRA配置  
         peft_config = LoraConfig(  

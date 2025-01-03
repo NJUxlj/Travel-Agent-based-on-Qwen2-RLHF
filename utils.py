@@ -65,7 +65,36 @@ def parse_args():
     parser.add_argument("--output_dir", type=str, required=True, help="输出目录")
     parser.add_argument("--device", type=str, default="cuda", help="设备")
     parser.add_argument("--device_map", type=str, default="auto", help="设备映射策略")
+    
+    # 添加 DeepSpeed 所需的参数  
+    parser.add_argument("--local_rank", type=int, default=-1)  
+    parser.add_argument("--deepspeed", type=str, default=None) 
+    
     return parser.parse_args()
+
+
+
+
+def check_deepspeed_env():  
+    """检查DeepSpeed环境"""  
+    import pkg_resources  
+    import torch  
+    
+    print("\n=== Environment Check ===")  
+    print(f"PyTorch version: {torch.__version__}")  
+    print(f"CUDA available: {torch.cuda.is_available()}")  
+    if torch.cuda.is_available():  
+        print(f"CUDA version: {torch.version.cuda}")  
+        print(f"GPU count: {torch.cuda.device_count()}")  
+    
+    try:  
+        ds_version = pkg_resources.get_distribution('deepspeed').version  
+        print(f"DeepSpeed version: {ds_version}")  
+    except pkg_resources.DistributionNotFound:  
+        print("DeepSpeed not found!")  
+        
+    return True
+
 
 
 
