@@ -14,6 +14,8 @@ import datetime
 from typing import List, Union, Optional  
 import torch.nn as nn
 import torch.distributed as dist  
+from torch.utils.checkpoint import checkpoint
+import torch.utils.checkpoint 
 import torch.multiprocessing as mp  
 from torch.nn.parallel import DistributedDataParallel as DDP 
 
@@ -35,12 +37,15 @@ from transformers import (
     AutoConfig,
     BertTokenizerFast,
     AutoModelForSequenceClassification,
+    AutoModelForCausalLM,
     
     BertForSequenceClassification,
     Qwen2ForCausalLM,
     Qwen2ForSequenceClassification,
     RobertaForSequenceClassification,
     GPT2ForSequenceClassification,
+    
+    BitsAndBytesConfig,
 )
 
 
@@ -49,6 +54,10 @@ from peft import (
     
 )
 
+from accelerate import (
+    init_empty_weights, 
+    load_checkpoint_and_dispatch  
+)
 
 from tqdm import tqdm
 from sklearn.metrics import precision_recall_fscore_support
@@ -56,13 +65,33 @@ from sklearn.metrics import precision_recall_fscore_support
 import os  
 import sys
 
+import sys
+sys.path.append("../../")  # 添加上级目录的上级目录到sys.path
+sys.path.append("../")
+from configs.config import MODEL_CONFIG, MODEL_PATH
 
+
+# 设置环境变量以启用显存优化  
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'  
+
+from dataclasses import dataclass
+import psutil  
+import pynvml
+
+@dataclass
+class SFTArguments:
+    def __init__(self):
+        self.model_name = MODEL_PATH
+        self.output_dir = "output"
+        self.device = "cuda"
+        self.device_map = "auto"
+        self.local_rank = -1
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="SFT Trainer Arguments")
-    parser.add_argument("--model_name", type=str, required=True, help="基础模型名称")
-    parser.add_argument("--output_dir", type=str, required=True, help="输出目录")
+    parser.add_argument("--model_name", type=str, required=True, help="基础模型名称", default = "/root/autodl-tmp/models/Qwen2.5-1.5B" )
+    parser.add_argument("--output_dir", type=str, required=True, help="输出目录", default = "output" )
     parser.add_argument("--device", type=str, default="cuda", help="设备")
     parser.add_argument("--device_map", type=str, default="auto", help="设备映射策略")
     
@@ -98,7 +127,7 @@ def check_deepspeed_env():
 
 
 
-def check_deepspeed_config():
+def check_deepspeed_config(training_args):
     # 1. 检查环境变量  
     print("Environment DEEPSPEED_CONFIG:", os.environ.get('DEEPSPEED_CONFIG'))  
     
@@ -142,6 +171,142 @@ def setup_cuda_debug_environment():
     print("===========================")  
     
     
+
+
+
+def load_split_model(model_name_or_path):  
+    """  
+    在加载前就将模型分割到多个GPU上  
+    """  
+    # 1. 首先获取模型配置  
+    config = AutoConfig.from_pretrained(model_name_or_path, trust_remote_code=True)  
+    
+    # 2. 计算每个GPU应该分配的最大内存  
+    max_memory = {  
+        0: "20GiB",  # GPU 0 最大使用15GB  
+        1: "20GiB",  # GPU 1 最大使用15GB  
+        "cpu": "15GB"  # CPU 内存预留30GB  
+    }  
+    
+    # 3. 使用 device_map="auto" 让 Accelerate 自动决定最优分配  
+    try:  
+        # 方法1：直接加载并自动分配  
+        model = AutoModelForCausalLM.from_pretrained(  
+            model_name_or_path,  
+            device_map="auto",  
+            max_memory=max_memory,  
+            torch_dtype=torch.bfloat16,  
+            trust_remote_code=True,  
+            use_flash_attention_2=True  
+        )  
+        
+    except Exception as e:  
+        print(f"Direct loading failed, trying alternative method: {str(e)}")  
+        
+        # 方法2：使用空权重初始化后再加载  
+        with init_empty_weights():  
+            model = AutoModelForCausalLM.from_config(config, trust_remote_code=True)  
+            
+        model = load_checkpoint_and_dispatch(  
+            model,  
+            model_name_or_path,  
+            device_map="auto",  
+            max_memory=max_memory,  
+            no_split_module_classes=["GPTBlock"],  # 适当设置不可分割的模块  
+            dtype=torch.bfloat16,  
+            offload_folder="offload"  # 设置权重卸载目录  
+        )  
+    
+    return model  
+
+
+
+
+
+
+def load_qwen_in_4bit(  
+    model_name,  
+    load_in_4bit=True,  
+    use_flash_attention=False  
+):  
+    """  
+    使用更激进的优化方案加载Qwen模型  
+    
+    Args:  
+        model_name: 模型名称或路径  
+        load_in_4bit: 是否使用4-bit量化  
+        use_flash_attention: 是否使用Flash Attention 2  
+    """  
+    # 初始化tokenizer  
+    tokenizer = AutoTokenizer.from_pretrained(  
+        model_name,  
+        trust_remote_code=True  
+    )  
+    
+    # 配置4-bit量化参数  
+    quantization_config = BitsAndBytesConfig(  
+        load_in_4bit=True,  
+        bnb_4bit_compute_dtype=torch.bfloat16,    # torch.float16,  
+        bnb_4bit_use_double_quant=True,  
+        bnb_4bit_quant_type="nf4",  # 使用nested float 4 量化  
+        bnb_4bit_quant_storage=torch.bfloat16,  # 存储时也使用4-bit 
+    )  
+
+    max_memory = {}  
+    for i in range(torch.cuda.device_count()):  
+        total_mem = torch.cuda.get_device_properties(i).total_memory / 1024**3  
+        # 预留2GB给系统  
+        max_memory[i] = f"{int(total_mem - 12)}GiB"  
+    max_memory["cpu"] = "15GB"  # CPU内存预留  
+
+    print("Max memory configuration:", max_memory)
+    
+    # 设置模型加载配置  
+    model_kwargs = {  
+        "torch_dtype": torch.bfloat16,  
+        "trust_remote_code": True,  
+        # "device_map": "auto",  
+        "quantization_config": quantization_config,  
+        "max_memory": max_memory,  # 限制GPU显存使用  
+        "offload_folder": "offload",  # 设置模型权重卸载目录  
+        # 启用梯度检查点以节省显存  
+        # "use_gradient_checkpointing": True,  
+    }  
+    
+    if use_flash_attention:  
+        model_kwargs["use_flash_attention_2"] = True  
+    
+    # 加载模型  
+    model = AutoModelForCausalLM.from_pretrained(  
+        model_name,  
+        **model_kwargs,  
+        low_cpu_mem_usage=True,  
+    )  
+
+    # 在模型加载后设置gradient checkpointing  
+    if hasattr(model, 'gradient_checkpointing_enable'):  
+        model.gradient_checkpointing_enable()  
+    elif hasattr(model, 'enable_gradient_checkpointing'):  
+        model.enable_gradient_checkpointing() 
+
+    # 禁用缓存  
+    model.config.use_cache = False  
+
+     # 注意：这种方法更细粒度，可以控制具体哪些层使用checkpoint  
+    for module in model.modules():  
+        if isinstance(module, torch.nn.TransformerEncoderLayer):
+            # 给forward加了一层包装，禁止计算中间层激活值  
+            module.forward = torch.utils.checkpoint.checkpoint(module.forward)  
+        elif isinstance(module, torch.nn.TransformerDecoderLayer):
+            module.forward = torch.utils.checkpoint.checkpoint(module.forward)
+    
+    
+    # 强制进行垃圾回收  
+    import gc  
+    gc.collect()    
+    torch.cuda.empty_cache()  
+    
+    return model
     
     
     
@@ -149,6 +314,64 @@ def setup_cuda_debug_environment():
     
     
     
+def monitor_memory():  
+    """监控GPU和CPU内存使用"""  
+
+    try:  
+        # 初始化 NVML  
+        pynvml.nvmlInit()  
+        
+        print("\nGPU Memory Usage:")  
+        # 获取所有GPU的信息  
+        for i in range(torch.cuda.device_count()):  
+            handle = pynvml.nvmlDeviceGetHandleByIndex(i)  
+            info = pynvml.nvmlDeviceGetMemoryInfo(handle)  
+            
+            print(f"\nGPU {i}:")  
+            print(f"Total memory: {info.total / 1024**3:.2f} GB")  
+            print(f"Used memory: {info.used / 1024**3:.2f} GB")  
+            print(f"Free memory: {info.free / 1024**3:.2f} GB")  
+            
+            # 获取GPU利用率  
+            utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)  
+            print(f"GPU Utilization: {utilization.gpu}%")  
+            print(f"Memory Utilization: {utilization.memory}%")  
+            
+        pynvml.nvmlShutdown()  
+        
+    except Exception as e:  
+        print(f"Error monitoring GPU memory: {str(e)}")  
+
+
+
+# 更简单的版本，只使用 torch  
+def print_gpu_memory():  
+    """使用 torch 打印 GPU 内存使用情况"""  
+    for i in range(torch.cuda.device_count()):  
+        print(f"\nGPU {i}: {torch.cuda.get_device_name(i)}")  
+        print(f"Memory Allocated: {torch.cuda.memory_allocated(i)/1024**3:.2f} GB")  
+        print(f"Memory Reserved: {torch.cuda.memory_reserved(i)/1024**3:.2f} GB")  
+        print(f"Max Memory Allocated: {torch.cuda.max_memory_allocated(i)/1024**3:.2f} GB")  
+
+# 完整的监控函数（包括CPU内存）  
+def monitor_system_resources():  
+    """监控系统资源使用情况"""  
+    import psutil  
+    
+    # CPU 使用情况  
+    print("\nCPU Usage:")  
+    print(f"CPU Usage: {psutil.cpu_percent()}%")  
+    
+    # 内存使用情况  
+    memory = psutil.virtual_memory()  
+    print("\nSystem Memory:")  
+    print(f"Total: {memory.total/1024**3:.2f} GB")  
+    print(f"Available: {memory.available/1024**3:.2f} GB")  
+    print(f"Used: {memory.used/1024**3:.2f} GB")  
+    print(f"Percentage: {memory.percent}%")  
+    
+    # GPU 使用情况  
+    print_gpu_memory()  
     
     
     

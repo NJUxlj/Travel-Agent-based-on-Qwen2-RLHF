@@ -2,7 +2,7 @@
 # 基础模型配置
 model:
   # 模型名称或路径
-  name: "/root/autodl-tmp/models/Qwen2.5-1.5B"  
+  name: "/root/autodl-tmp/models/Qwen2.5-0.5B"  
   # 模型类型
   model_type: "causal_lm"
   # 是否使用混合精度训练

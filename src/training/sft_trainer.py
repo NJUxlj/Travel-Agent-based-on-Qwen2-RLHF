@@ -27,6 +27,8 @@ from utils import (
     check_deepspeed_env,
     check_deepspeed_config,
     load_qwen_in_4bit,
+    SFTArguments,
+    monitor_memory
 )
 
 from data.data_processor import DataProcessor, CrossWOZProcessor
@@ -50,6 +52,13 @@ deepspeed --num_gpus=2 sft_trainer.py \
 --output_dir "output" \
 --device "cuda" \
 --device_map "auto"
+
+deepspeed --num_gpus=2 sft_trainer.py \
+--deepspeed ds_config.json
+
+
+deepspeed --num_gpus 2 sft_trainer.py \
+    --deepspeed ds_config.json
 
 '''
 
@@ -139,13 +148,16 @@ class SFTTrainer:
             num_train_epochs=3,  
             per_device_train_batch_size=1,  # 每个GPU上的batch size
             per_device_eval_batch_size=1,  
-            gradient_accumulation_steps=32,  
+            gradient_accumulation_steps=4,  
             learning_rate=2e-4,  
             weight_decay=0.01,  
             warmup_steps=100,
             warmup_ratio=0.03,  
             lr_scheduler_type="cosine",  
-            fp16=True,  
+            # 改用 bf16 而不是 fp16，因为 bf16 数值稳定性更好  
+            bf16=True,  # 修改这里  
+            fp16=False, # 关闭 fp16 
+            # fp16=True,  
             logging_steps=100,  
             save_steps=100,  
             eval_steps=100,  
@@ -158,6 +170,8 @@ class SFTTrainer:
             # 分布式训练配置  
             local_rank=int(os.getenv("LOCAL_RANK", -1)),  
             ddp_find_unused_parameters=False,  
+            # 添加以下参数来启用 8-bit 优化器  
+            optim="paged_adamw_8bit",  
         )  
         
         # 更新训练参数
@@ -189,7 +203,7 @@ class SFTTrainer:
         data_collator = DataCollatorForSeq2Seq(  
             tokenizer=self.tokenizer,  
             model=self.model,
-            max_length=self.max_length,
+            max_length=1024, # self.max_length,
             padding="max_length",
             return_tensors="pt",
             # mlm=False  
@@ -212,6 +226,7 @@ class SFTTrainer:
             ]  
         )
         
+        monitor_memory()
         # 开始训练
         trainer.train(resume_from_checkpoint=resume_from_checkpoint)
         
@@ -279,7 +294,7 @@ class SFTTrainer:
 
 
 if __name__ == "__main__":
-    args = parse_args()  # 使用parse_args获取参数
+    args = SFTArguments()  # 使用parse_args获取参数
     trainer = SFTTrainer(args = args)
     
     processor = CrossWOZProcessor(

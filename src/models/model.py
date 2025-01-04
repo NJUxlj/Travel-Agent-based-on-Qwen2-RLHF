@@ -8,6 +8,11 @@ import sys
 sys.path.append("../../")  # 添加上级目录的上级目录到sys.path
 from configs.config import MODEL_CONFIG
 
+from utils import (
+    load_qwen_in_4bit,
+    load_split_model,
+)
+
 
 class TravelAgent:
 
@@ -17,6 +22,7 @@ class TravelAgent:
         device_map: str = "auto",
         device: str = "cuda" if torch.cuda.is_available() else "cpu", 
         lora_config: Optional[Dict] = None,
+        use_bnb=True,
         ) -> tuple:
         """
         加载基础模型和分词器
@@ -32,6 +38,7 @@ class TravelAgent:
         self.device = device  
         self.device_map = device_map
         self.model_name = model_name  
+        self.use_bnb=use_bnb
         
         # 默认LoRA配置  
         self.lora_config = {  
@@ -57,19 +64,22 @@ class TravelAgent:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         
         self.model = self._init_model().to(self.device)
+        torch.cuda.empty_cache()  
         
         
     
     def _init_model(self) -> AutoModelForCausalLM:  
         """初始化模型并应用LoRA配置"""  
         # 加载基础模型  
-        model = AutoModelForCausalLM.from_pretrained(  
-            self.model_name,  
-            trust_remote_code=True,
-            torch_dtype=torch.float16,  
-            load_in_8bit = True,
-            # device_map=self.device_map  # 并行训练时， 不能使用自动设备映射
-        )
+        # model = AutoModelForCausalLM.from_pretrained(  
+        #     self.model_name,  
+        #     trust_remote_code=True,
+        #     torch_dtype=torch.float16,  
+        #     load_in_8bit = True if self.use_bnb else False,
+        #     # device_map=self.device_map  # 并行训练时， 不能使用自动设备映射
+        # )
+        
+        model = load_qwen_in_4bit(self.model_name)
         
         # 应用LoRA配置  
         peft_config = LoraConfig(  

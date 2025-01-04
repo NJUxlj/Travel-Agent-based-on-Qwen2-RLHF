@@ -184,7 +184,7 @@ class DataProcessor:
             encoded = self.tokenizer(  
                 full_text,  
                 truncation=True,  
-                max_length=self.max_length,  
+                max_length= 1024, # self.max_length,  
                 padding="max_length",  
                 return_tensors=None,  
             )  

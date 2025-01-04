@@ -14,7 +14,9 @@ DPO_CONFIG = load_config(BASE_DIR / 'configs' / 'dpo_config.yaml')
 
 
 
-BATCH_SIZE = 32
+MODEL_PATH = "/root/autodl-tmp/models/Qwen2.5-0.5B"
+
+BATCH_SIZE = 8
 NUM_PROCESSES = 2
 
 
