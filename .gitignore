@@ -4,3 +4,4 @@ data/
 
 configs/__pycache__/
 model_weights/
+outputs/
