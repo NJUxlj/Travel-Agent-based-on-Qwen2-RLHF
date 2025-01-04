@@ -24,7 +24,9 @@ from models.model import TravelAgent
 from utils import (
     parse_args,
     get_max_length_from_model,
-    check_deepspeed_env
+    check_deepspeed_env,
+    check_deepspeed_config,
+    load_qwen_in_4bit,
 )
 
 from data.data_processor import DataProcessor, CrossWOZProcessor
@@ -116,7 +118,8 @@ class SFTTrainer:
             model_name=self.model_name,
             device=self.device,
             device_map=self.device_map,
-            lora_config=lora_config
+            lora_config=lora_config,
+            use_bnb=True
         )
         
         self.model = self.agent.model
@@ -162,6 +165,8 @@ class SFTTrainer:
             self.training_args = training_args
         else:
             self.training_args = default_training_args
+        
+        check_deepspeed_config(self.training_args)
     
 
     
