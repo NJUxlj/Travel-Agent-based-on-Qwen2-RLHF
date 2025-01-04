@@ -72,7 +72,8 @@ from configs.config import MODEL_CONFIG, MODEL_PATH
 
 
 # 设置环境变量以启用显存优化  
-os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'  
+# os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'  
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:512,expandable_segments:True" 
 
 from dataclasses import dataclass
 import psutil  
@@ -242,6 +243,8 @@ def load_qwen_in_4bit(
         model_name,  
         trust_remote_code=True  
     )  
+
+    torch.cuda.empty_cache()  
     
     # 配置4-bit量化参数  
     quantization_config = BitsAndBytesConfig(  
@@ -256,7 +259,7 @@ def load_qwen_in_4bit(
     for i in range(torch.cuda.device_count()):  
         total_mem = torch.cuda.get_device_properties(i).total_memory / 1024**3  
         # 预留2GB给系统  
-        max_memory[i] = f"{int(total_mem - 12)}GiB"  
+        max_memory[i] = f"{int(total_mem - 2)}GiB"  
     max_memory["cpu"] = "15GB"  # CPU内存预留  
 
     print("Max memory configuration:", max_memory)
@@ -282,6 +285,8 @@ def load_qwen_in_4bit(
         **model_kwargs,  
         low_cpu_mem_usage=True,  
     )  
+
+    torch.cuda.empty_cache()  
 
     # 在模型加载后设置gradient checkpointing  
     if hasattr(model, 'gradient_checkpointing_enable'):  

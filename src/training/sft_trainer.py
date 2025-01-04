@@ -227,6 +227,7 @@ class SFTTrainer:
         )
         
         monitor_memory()
+        torch.cuda.empty_cache()  
         # 开始训练
         trainer.train(resume_from_checkpoint=resume_from_checkpoint)
         
