@@ -3,3 +3,4 @@
 /data/
 /.gradio/
 /configs/__pycache__/
+/model_weights/
