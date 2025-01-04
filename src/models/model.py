@@ -2,6 +2,7 @@ from typing import Dict, Optional
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import get_peft_model, LoraConfig, TaskType
+import bitsandbytes as bnb
 
 import sys
 sys.path.append("../../")  # 添加上级目录的上级目录到sys.path
@@ -66,6 +67,7 @@ class TravelAgent:
             self.model_name,  
             trust_remote_code=True,
             torch_dtype=torch.float16,  
+            load_in_8bit = True,
             # device_map=self.device_map  # 并行训练时， 不能使用自动设备映射
         )
         

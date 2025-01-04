@@ -98,6 +98,24 @@ def check_deepspeed_env():
 
 
 
+def check_deepspeed_config():
+    # 1. 检查环境变量  
+    print("Environment DEEPSPEED_CONFIG:", os.environ.get('DEEPSPEED_CONFIG'))  
+    
+    # 2. 检查 TrainingArguments 中的配置  
+    print("TrainingArguments deepspeed config:", training_args.deepspeed)
+
+
+    # 如果想看具体内容  
+    if training_args.deepspeed:  
+        import json  
+        try:  
+            with open(training_args.deepspeed, 'r') as f:  
+                ds_config = json.load(f)  
+            print("DeepSpeed config content:", json.dumps(ds_config, indent=2))  
+        except Exception as e:  
+            print(f"Error reading deepspeed config: {e}") 
+
 
 
 

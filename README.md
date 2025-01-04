@@ -6,7 +6,7 @@ Man, what can I say !
 请注意：报告中仅描述了该项目的早期版本，很多重要模块都没加
 
 ## 环境配置
-**GPU**: RTX3090 $\times$ 2
+**GPU**: RTX3090 x 2
 **Platform**: AutoDL
 - NAME="Ubuntu"
 - VERSION="20.04.4 LTS (Focal Fossa)"
