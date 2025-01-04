@@ -1,3 +1,5 @@
 /_pycache_/
 /.gradio/
 /data/
+/.gradio/
+/configs/__pycache__/
