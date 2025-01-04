@@ -1,6 +1,6 @@
-/_pycache_/
-/.gradio/
-/data/
-/.gradio/
-/configs/__pycache__/
-/model_weights/
+_pycache_
+.gradio/
+data/
+
+configs/__pycache__/
+model_weights/
