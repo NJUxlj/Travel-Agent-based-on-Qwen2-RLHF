@@ -1,9 +1,8 @@
 ## 基于Qwen2.5+LoRA微调+RLHF+RAG的旅游路径规划智能体
 
-Man, what can I say !
-## 实验报告
-有 实验报告.pdf 可供了解。
-请注意：报告中仅描述了该项目的早期版本，很多重要模块都没加
+
+
+
 
 ## 环境配置
 **GPU**: RTX3090 x 2
@@ -98,3 +97,16 @@ configs:
 
 #### 运行结果解释
 我们给RAG的问题包含了：question+context， context是由数据集中前5个与question最接近的样本组成的。
+
+
+
+
+
+
+## Citation
+- we refer to many other projects when building this project.
+- [knowledge-graph-from-GPT](https://github.com/tomhartke/knowledge-graph-from-GPT.git)
+- [ai-travel-agent](https://github.com/nirbar1985/ai-travel-agent.git)
+- [GPT2](https://github.com/affjljoo3581/GPT2.git)
+- [RLHF_instructGPT](https://github.com/LanXiu0523/RLHF_instructGPT.git)
+
