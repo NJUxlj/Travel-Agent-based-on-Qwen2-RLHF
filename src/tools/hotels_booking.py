@@ -9,5 +9,5 @@ from langchain_core.tools import tool
 
 
 
-class HotelsInput:
+class HotelsInput(BaseModel):
     pass
