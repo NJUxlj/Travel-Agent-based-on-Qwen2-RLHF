@@ -97,3 +97,53 @@ def convert_abstraction_group_to_concept_list(abs_grp):
     [concept_list.update(concepts) for concepts in abs_grp.values()]
     
     return list(concept_list)
+
+
+
+
+def sample_question_list(question_list):
+    """ Take up to 3 questions randomly from a question list and concatenate. used for getting subject lists"""
+    res = np.random.choice(question_list, size = min(3, len(question_list)), replace = False)
+    return " ".join(res)
+
+
+
+
+
+def user_triage_list(objects_to_triage):
+    '''
+    对一组对象进行分类以决定接下来要关注的内容  
+    向用户展示对象，并询问是否保留。返回精简后的列表
+    '''
+    pass
+
+
+
+
+def extract_abstraction_groups():
+    pass
+
+
+
+
+
+
+
+
+def get_card_representation():
+    pass
+
+
+
+
+
+
+
+
+def get_question_subject_list_in_graph(knowledgeGraph, 
+                                       question, 
+                                       related_cardIDs = [],
+                                       num_random_cards_to_show=5, verbose=False):
+
+    pass
+
