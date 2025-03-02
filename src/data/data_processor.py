@@ -726,14 +726,17 @@ class TravelQAProcessor(DataProcessor):
         dataset = load_dataset(dataset_name_or_path, split = split)
         
         
-        dataset = {
-            k:v.select(range(500)) for k,v in dataset.items()
-        }
-        
-        self.dataset = DatasetDict(dataset)
-        
+        if split == None:
+            dataset = {
+                k:v.select(range(500)) for k,v in dataset.items()
+            }
+            
+            self.dataset = DatasetDict(dataset)
+        else:
+            self.dataset = DatasetDict({split: dataset.select(range(500))}) 
+
     
-        return dataset
+        return self.dataset
         
 
         
@@ -793,17 +796,66 @@ class TravelQAProcessor(DataProcessor):
                 return_tensors='pt'  
             )  
             
+            # print("tokenized_input['input_ids'] = ", tokenized_input['input_ids'])
+            # print("tokenized_input['input_ids'].shape = ", tokenized_input['input_ids'].shape)
+            
             return {  
-                'input_ids': tokenized_input['input_ids'][0],  
+                'input_ids': tokenized_input['input_ids'][0],    # shape = [1, 1024]
                 'attention_mask': tokenized_input['attention_mask'][0],  
                 'labels': tokenized_output['input_ids'][0]  
             }  
             
-        return self.dataset.map(
-            _prepare_single_sample,
-            remove_columns=self.dataset['train'].column_names,
-            load_from_cache_file=False,
-        )
+        def _prepare_batch_samples(batch_examples):
+            # 批量处理输入（带系统提示）  
+            input_texts = [  
+                f"{self.system_prompt}\nQuestion: {q}\nAnswer:"  
+                for q in batch_examples['Question']  
+            ]  
+            
+            # 批量处理输出  
+            output_texts = batch_examples['Response']  
+
+            # 批量tokenize  
+            tokenized_inputs = self.tokenizer(  
+                input_texts,  
+                max_length=self.max_length,  
+                truncation=True,  
+                padding='max_length',  
+                return_tensors="np"  # 使用numpy数组提高效率  
+            )  
+            
+            tokenized_labels = self.tokenizer(  
+                output_texts,  
+                max_length=self.max_length,  
+                truncation=True,  
+                padding='max_length',  
+                return_tensors="np"  
+            )  
+
+            return {  
+                'input_ids': tokenized_inputs['input_ids'].tolist(),  
+                'attention_mask': tokenized_inputs['attention_mask'].tolist(),  
+                'labels': tokenized_labels['input_ids'].tolist()  
+            }  
+            
+        # return self.dataset.map(
+        #     _prepare_single_sample,
+        #     remove_columns=self.dataset['train'].column_names,
+        #     load_from_cache_file=False,
+        # )
+        
+        print("before mapping")
+        
+        return DatasetDict({  
+            split: ds.map(  
+                _prepare_batch_samples,  
+                remove_columns=ds.column_names,  # 使用当前split的列名  
+                # load_from_cache_file=True,
+                batched=True,  # 启用批处理  
+                batch_size=1,  # 根据内存调整  
+            )  
+            for split, ds in self.dataset.items()  
+        })  
 
 
 

@@ -342,7 +342,7 @@ def load_qwen(
     
     # 设置模型加载配置  
     model_kwargs = {  
-        # "torch_dtype": torch.bfloat16,  # 防止和 deepspeed 配置冲突
+        "torch_dtype": torch.float16,  # 防止和 deepspeed 配置冲突
         "trust_remote_code": True,  
         # "device_map": "auto",  
         "max_memory": max_memory,  # 限制GPU显存使用  

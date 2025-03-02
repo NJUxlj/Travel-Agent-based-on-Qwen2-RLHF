@@ -95,6 +95,9 @@ class SFTTrainer:
         # device = "auto",
         # device_map = 'auto',
         lora_config: Optional[Dict] = None,
+        use_bnb = False, # 无法直接微调量化后的模型
+        use_lora = False,
+        max_length = 2048,
         args = None
     ):
         """
@@ -117,6 +120,10 @@ class SFTTrainer:
         self.device_map = args.device_map
         self.local_rank = args.local_rank
         
+        self.use_bnb = use_bnb
+        self.use_lora = use_lora
+        self.max_length= max_length
+        
         if self.local_rank!=-1:
             self.device = torch.device("cuda", self.local_rank)
         else:
@@ -128,8 +135,8 @@ class SFTTrainer:
             device=self.device,
             device_map=self.device_map,
             lora_config=lora_config,
-            use_bnb=False,
-            use_lora = True
+            use_bnb=self.use_bnb,
+            use_lora = self.use_lora,
         )
         
         self.model = self.agent.model
@@ -204,13 +211,20 @@ class SFTTrainer:
         data_collator = DataCollatorForSeq2Seq(  
             tokenizer=self.tokenizer,  
             model=self.model,
-            max_length=1024, # self.max_length,
+            max_length=self.max_length, # self.max_length 参数指的是 input + output 的总长度。
             padding="max_length",
             return_tensors="pt",
             pad_to_multiple_of=8,  # 提升计算效率  
             # padding="longest",      # 动态填充 
             # mlm=False  
         )  
+        
+        
+        
+        sample = next(iter(train_dataset))  
+        print("Input[0] :", sample["input_ids"])  # 应该类似 (seq_len,)  
+        # print("Label type:", type(sample["labels"]))      # 应该为torch.Tensor  
+        # print("Label shape:", sample["labels"].shape)     # 应该与input_ids一致 
         
         # 创建训练器
         trainer = CustomTrainer(

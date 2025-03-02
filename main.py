@@ -31,6 +31,8 @@ processor.load_dataset_from_hf(DATA_PATH)
 
 processed_data = processor.prepare_training_features()
 
+print("mapping over")
+
 
 
 keys = list(processed_data.keys())
@@ -38,6 +40,6 @@ keys = list(processed_data.keys())
 print("keys = ", keys)
 
 trainer.train(
-    train_dataset=processed_data["train"][:250],
-    eval_dataset=processed_data["train"][250:]
+    train_dataset=processed_data["train"].select(range(250)),
+    eval_dataset=processed_data["train"].select(range(250,500))
 )
