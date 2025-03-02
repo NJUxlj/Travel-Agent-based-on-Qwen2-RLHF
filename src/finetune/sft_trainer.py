@@ -97,7 +97,7 @@ class SFTTrainer:
         lora_config: Optional[Dict] = None,
         use_bnb = False, # 无法直接微调量化后的模型
         use_lora = False,
-        max_length = 2048,
+        max_length = 1024,
         args = None
     ):
         """
