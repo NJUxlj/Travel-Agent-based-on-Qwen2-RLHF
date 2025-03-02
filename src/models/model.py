@@ -12,10 +12,16 @@ import sys
 sys.path.append("../../")  # 添加上级目录的上级目录到sys.path
 from configs.config import MODEL_CONFIG
 
-from utils import (
+from utils.utils import (
     load_qwen_in_4bit,
     load_split_model,
+    load_qwen
 )
+
+from models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
+
+from finetune.sft_trainer import SFTTrainer
+from finetune.dpo_trainer import DPOTrainer
 
 
 class TravelAgent:
@@ -26,7 +32,14 @@ class TravelAgent:
         device_map: str = "auto",
         device: str = "cuda" if torch.cuda.is_available() else "cpu", 
         lora_config: Optional[Dict] = None,
-        use_bnb=True,
+        sft_trainer = None,
+        dpo_trainer = None,
+        use_bnb=False,
+        use_lora = False,
+        use_sft = False,
+        use_dpo = False,
+        use_ppo = False,
+        use_grpo = False
         ) -> tuple:
         """
         加载基础模型和分词器
@@ -43,6 +56,11 @@ class TravelAgent:
         self.device_map = device_map
         self.model_name = model_name  
         self.use_bnb=use_bnb
+        self.use_lora = use_lora
+        self.use_sft = use_sft
+        self.use_dpo = use_dpo
+        self.use_ppo = use_ppo
+        self.use_grpo = use_grpo
         
         # 默认LoRA配置  
         self.lora_config = {  
@@ -52,9 +70,7 @@ class TravelAgent:
             "lora_dropout": 0.1,  
             "bias": "none",  
             "task_type": TaskType.CAUSAL_LM  
-        }  
-        if lora_config:  
-            self.lora_config.update(lora_config)  
+        }  if lora_config is None else lora_config
         
         # 加载分词器
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -67,7 +83,18 @@ class TravelAgent:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         
-        self.model = self._init_model().to(self.device)
+        self.model: Qwen2ForCausalLM = self._init_model().to(self.device)
+        
+        
+        
+        
+        if self.use_sft:
+            self.sft_trainer = sft_trainer
+            
+        if self.use_dpo:
+            self.dpo_trainer = dpo_trainer
+        
+        
         torch.cuda.empty_cache()  
         
         
@@ -83,55 +110,27 @@ class TravelAgent:
         #     # device_map=self.device_map  # 并行训练时， 不能使用自动设备映射
         # )
         
-        model = load_qwen_in_4bit(self.model_name)
         
+        if self.use_bnb:
+            model = load_qwen_in_4bit(self.model_name)
+        else:
+            model = load_qwen(self.model_name)
+        
+        
+        if self.use_lora:
         # 应用LoRA配置  
-        peft_config = LoraConfig(  
-            r=self.lora_config["r"],  
-            lora_alpha=self.lora_config["lora_alpha"],  
-            target_modules=self.lora_config["target_modules"],  
-            lora_dropout=self.lora_config["lora_dropout"],  
-            bias=self.lora_config["bias"],  
-            task_type=self.lora_config["task_type"]  
-        )  
+            peft_config = LoraConfig(  
+                r=self.lora_config["r"],  
+                lora_alpha=self.lora_config["lora_alpha"],  
+                target_modules=self.lora_config["target_modules"],  
+                lora_dropout=self.lora_config["lora_dropout"],  
+                bias=self.lora_config["bias"],  
+                task_type=self.lora_config["task_type"]  
+            )  
+            
+            model = get_peft_model(model, peft_config)  
         
-        model = get_peft_model(model, peft_config)  
         return model  
-    
-    # @staticmethod
-    # def prepare_model_for_lora(
-    #     model: AutoModelForCausalLM,
-    #     lora_config: Optional[Dict] = None
-    # ) -> AutoModelForCausalLM:
-    #     """
-    #     为模型添加LoRA配置
-        
-    #     Args:
-    #         model: 基础模型
-    #         lora_config: LoRA配置参数
-        
-    #     Returns:
-    #         添加了LoRA的模型
-    #     """
-    #     default_config = {
-    #         "r": 8,  # LoRA秩
-    #         "lora_alpha": 32,  # LoRA alpha参数
-    #         "lora_dropout": 0.1,
-    #         "bias": "none",
-    #         "task_type": TaskType.CAUSAL_LM,
-    #         "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"]  # 需要训练的模块
-    #     }
-        
-    #     # 使用用户配置更新默认配置
-    #     if lora_config:
-    #         default_config.update(lora_config)
-        
-    #     # 创建LoRA配置
-    #     peft_config = LoraConfig(**default_config)
-        
-    #     # 获取PEFT模型
-    #     model = get_peft_model(model, peft_config)
-    #     return model
     
 
     def generate_response(
@@ -177,3 +176,99 @@ class TravelAgent:
         response = response[len(prompt):]
         
         return response.strip()
+    
+    
+    
+    
+    def chat(self):  
+        """简单聊天功能，交互式对话"""  
+        
+        history = [("You are a very help AI assistant who can help me plan a wonderful trip for a vacation",
+                    "OK, I know you want to have a good travel plan and I will answer your questions about the traveling spot and search for the best plan about the traveling route and hotel.")]
+
+        print(" ============ Welcome to the TravelAgent Chat! Type 'exit' to stop chatting. ==========")  
+        while True:  
+            user_input = input(f"User: ")  
+            if user_input.lower() == 'exit':  
+                print("Goodbye!")  
+                break  
+            formatted_history = " ".join([f"User: {user}\nSystem: {sys}\n" for user, sys in history])
+            response = self.generate_response(formatted_history+"\n"+user_input)  
+            print(f"TravelAgent: {response}")  
+            print(" ======================================= ")
+            
+            history.append((user_input, response))
+            
+            
+            
+    def stream_chat(
+        self, 
+        prompt: str, 
+        max_length: int = 2048, 
+        temperature: float = 0.7, 
+        top_p: float = 0.9
+        ):  
+        """流式聊天功能，逐步返回响应"""  
+        # 编码输入  
+        inputs = self.tokenizer(prompt, return_tensors="pt", padding=True)  
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}  
+        
+        generated_ids = inputs['input_ids'].clone()  # 保存完整生成序列  
+        attention_mask = inputs['attention_mask'].clone()  
+        
+
+        # 生成响应，使用流式生成  
+        for _ in range(max_length):
+            with torch.no_grad():  
+                outputs =  self.model.generate(  
+                    input_ids = generated_ids,  
+                    attention_mask = attention_mask,
+                    max_length=max_length,  
+                    temperature=temperature,  
+                    top_p=top_p, 
+                    max_new_tokens=1,  # 每次生成1个新token
+                    do_sample=True,  
+                    pad_token_id=self.tokenizer.pad_token_id,  
+                    eos_token_id=self.tokenizer.eos_token_id,  
+                    # 使用`output_scores=True`和`return_dict_in_generate=True`来启用流式生成  
+                    output_scores=True,  
+                    return_dict_in_generate=True,  
+                    # 启用流式生成  
+                    num_return_sequences=1,  
+                    # 可以在这里设置其他流式生成的参数  
+                    output_hidden_states=False  
+                )
+                    
+                '''
+                output.type = GenerateDecoderOnlyOutput(
+                    sequences=input_ids,
+                    scores=scores,
+                    logits=raw_logits,
+                    attentions=decoder_attentions,
+                    hidden_states=decoder_hidden_states,
+                    past_key_values=model_kwargs.get("past_key_values"),
+                )
+                '''
+                    
+                    
+            # 获取新生成的token 
+            new_token = outputs.sequences[0, -1].item() 
+            # new_word = self.tokenizer.decode(new_token, skip_special_tokens=True) 
+            
+            if new_token == self.tokenizer.eos_token_id:
+                break 
+            
+            # 更新序列和注意力掩码 
+            generated_ids = torch.concat([generated_ids, new_token.unsqueeze(-1)], dim=-1)
+            
+            attention_mask = torch.concat([
+                attention_mask,
+                torch.ones((1,1), device = self.device, dtype = attention_mask.dtype)], dim=-1)
+
+            # 解码并返回当前结果
+            current_response = self.tokenizer.decode(
+                generated_ids[0],
+                skip_special_tokens=True
+            )[len(prompt):]
+            
+            yield current_response

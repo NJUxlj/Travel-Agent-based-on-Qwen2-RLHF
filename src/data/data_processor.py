@@ -34,7 +34,7 @@ from datasets import (
 import sys
 sys.path.append("../../")  # 添加上级目录的上级目录到sys.path
 sys.path.append("../")
-from utils import (
+from utils.utils import (
     get_max_length_from_model,
 )
 
@@ -700,6 +700,103 @@ class CrossWOZProcessor(DataProcessor):
             remove_columns=dataset.column_names,  
             load_from_cache_file=False  
         )  
+        
+        
+
+
+class TravelQAProcessor(DataProcessor):
+    def __init__(self,
+        tokenizer: PreTrainedTokenizer,
+        max_length: int = 1024,
+        system_prompt: str = "You are a helpful AI travel agent. Help users plan their trips and provide travel advice.",
+        ):  
+        super().__init__(tokenizer, max_length, system_prompt)
+        
+    
+    
+    def _format_qa_pair(self):
+        '''
+        用来处理json文件中的每一条数据
+        '''
+        pass
+    
+    
+    
+    def load_dataset_from_hf(self, dataset_name_or_path, split = None)->Dataset:
+        dataset = load_dataset(dataset_name_or_path, split = split)
+        
+        self.dataset = dataset
+        return dataset
+        
+
+        
+    def load_dataset_from_json(self, file_path)->Dataset:
+        try:  
+            self.logger.info(f"Loading QA data from {file_path}")  
+            with open(file_path, 'r', encoding='utf-8') as f:  
+                raw_data:List[Dict] = json.load(f)  
+            
+            df = pd.DataFrame(raw_data)  
+            df = df.fillna("")  
+            self.logger.info(f"Created QA dataset with {len(df)} samples")  
+            # self.logger.info(f"Sample distribution:\n{df['category'].value_counts()}")  
+                
+        except Exception as e:  
+            self.logger.error(f"QA数据加载失败: {str(e)}")  
+            raise  
+        
+        self.dataset = Dataset.from_pandas(df)
+        return self.dataset
+    
+    
+    
+    
+    def prepare_training_features(self) -> Dataset:
+        """
+        准备用于训练的特征
+
+        Args:
+            dataset: 原始数据集
+            tokenizer: 分词器
+            max_length: 最大序列长度
+
+        Returns:
+            Dataset: 处理后的数据集
+        """
+        def _prepare_single_sample(example):  
+            # 构建带系统提示的输入文本  
+            full_prompt = f"{self.system_prompt}\n\nQuestion: {example['question']}\nAnswer:"  
+            
+            # Tokenize输入和输出  
+            tokenized_input = self.tokenizer(  
+                full_prompt,  
+                truncation=True,  
+                max_length=self.max_length,  
+                padding='max_length',  
+                return_tensors='pt'  
+            )  
+            
+            
+            # Tokenize答案（作为labels）  
+            tokenized_output = self.tokenizer(  
+                example['response'],  
+                truncation=True,  
+                max_length=self.max_length,  
+                padding='max_length',  
+                return_tensors='pt'  
+            )  
+            
+            return {  
+                'input_ids': tokenized_input['input_ids'][0],  
+                'attention_mask': tokenized_input['attention_mask'][0],  
+                'labels': tokenized_output['input_ids'][0]  
+            }  
+            
+        return self.dataset.map(
+            _prepare_single_sample,
+            remove_columns=self.dataset.column_names,
+            load_from_cache_file=False,
+        )
 
 
 

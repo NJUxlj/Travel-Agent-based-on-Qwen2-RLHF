@@ -21,7 +21,7 @@ sys.path.append("../../")  # 添加上级目录的上级目录到sys.path
 sys.path.append("../")
 from configs.config import MODEL_CONFIG, BATCH_SIZE
 from models.model import TravelAgent
-from utils import (
+from utils.utils import (
     parse_args,
     get_max_length_from_model,
     check_deepspeed_env,
@@ -128,7 +128,8 @@ class SFTTrainer:
             device=self.device,
             device_map=self.device_map,
             lora_config=lora_config,
-            use_bnb=True
+            use_bnb=False,
+            use_lora = True
         )
         
         self.model = self.agent.model
@@ -155,7 +156,7 @@ class SFTTrainer:
             warmup_ratio=0.03,  
             lr_scheduler_type="cosine",  
             # 改用 bf16 而不是 fp16，因为 bf16 数值稳定性更好  
-            bf16=True,  # 修改这里  
+            bf16=False,  # 修改这里  
             fp16=False, # 关闭 fp16 
             # fp16=True,  
             logging_steps=100,  
@@ -206,6 +207,8 @@ class SFTTrainer:
             max_length=1024, # self.max_length,
             padding="max_length",
             return_tensors="pt",
+            pad_to_multiple_of=8,  # 提升计算效率  
+            # padding="longest",      # 动态填充 
             # mlm=False  
         )  
         
