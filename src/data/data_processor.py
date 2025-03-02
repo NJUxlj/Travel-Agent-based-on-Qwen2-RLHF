@@ -34,11 +34,11 @@ from datasets import (
 import sys
 sys.path.append("../../")  # 添加上级目录的上级目录到sys.path
 sys.path.append("../")
-from utils.utils import (
+from src.utils.utils import (
     get_max_length_from_model,
 )
 
-from configs.config import BATCH_SIZE
+from src.configs.config import BATCH_SIZE
 
 class DataProcessor:
     """
@@ -722,10 +722,17 @@ class TravelQAProcessor(DataProcessor):
     
     
     
-    def load_dataset_from_hf(self, dataset_name_or_path, split = None)->Dataset:
+    def load_dataset_from_hf(self, dataset_name_or_path, split = None)->DatasetDict|Dataset:
         dataset = load_dataset(dataset_name_or_path, split = split)
         
-        self.dataset = dataset
+        
+        dataset = {
+            k:v.select(range(500)) for k,v in dataset.items()
+        }
+        
+        self.dataset = DatasetDict(dataset)
+        
+    
         return dataset
         
 
@@ -765,7 +772,7 @@ class TravelQAProcessor(DataProcessor):
         """
         def _prepare_single_sample(example):  
             # 构建带系统提示的输入文本  
-            full_prompt = f"{self.system_prompt}\n\nQuestion: {example['question']}\nAnswer:"  
+            full_prompt = f"{self.system_prompt}\n\nQuestion: {example['Question']}\nAnswer:"  
             
             # Tokenize输入和输出  
             tokenized_input = self.tokenizer(  
@@ -779,7 +786,7 @@ class TravelQAProcessor(DataProcessor):
             
             # Tokenize答案（作为labels）  
             tokenized_output = self.tokenizer(  
-                example['response'],  
+                example['Response'],  
                 truncation=True,  
                 max_length=self.max_length,  
                 padding='max_length',  
@@ -794,7 +801,7 @@ class TravelQAProcessor(DataProcessor):
             
         return self.dataset.map(
             _prepare_single_sample,
-            remove_columns=self.dataset.column_names,
+            remove_columns=self.dataset['train'].column_names,
             load_from_cache_file=False,
         )
 

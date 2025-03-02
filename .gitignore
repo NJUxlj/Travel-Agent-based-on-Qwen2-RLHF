@@ -1,6 +1,6 @@
 **/__pycache__/
 .gradio/
-data/
+src/data/travel_qa
 
 model_weights/
 outputs/

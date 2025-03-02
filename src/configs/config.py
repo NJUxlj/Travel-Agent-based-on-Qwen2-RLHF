@@ -35,9 +35,9 @@ SFT_DPO_MODEL_PATH = os.path.join(OUTPUT_DIR, SFT_DPO_MODEL_NAME)
 
 
 
-DATA_PATH = "../data/crosswoz_sft"
+DATA_PATH = "src/data/travel_qa"
 
-DEEPSPEED_CONFIG_PATH = "src\configs\ds_config.yaml"
+DEEPSPEED_CONFIG_PATH = "src/configs/ds_config.json"
 
 
 

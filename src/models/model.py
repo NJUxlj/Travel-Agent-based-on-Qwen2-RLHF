@@ -10,18 +10,18 @@ import bitsandbytes as bnb
 
 import sys
 sys.path.append("../../")  # 添加上级目录的上级目录到sys.path
-from configs.config import MODEL_CONFIG
+from src.configs.config import MODEL_CONFIG
 
-from utils.utils import (
+from src.utils.utils import (
     load_qwen_in_4bit,
     load_split_model,
     load_qwen
 )
 
-from models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
+from src.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
 
-from finetune.sft_trainer import SFTTrainer
-from finetune.dpo_trainer import DPOTrainer
+# from src.finetune.sft_trainer import SFTTrainer
+# from src.finetune.dpo_trainer import DPOTrainer
 
 
 class TravelAgent:

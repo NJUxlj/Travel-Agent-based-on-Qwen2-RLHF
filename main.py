@@ -1,5 +1,5 @@
 from src.models.model import TravelAgent  
-from src.ui.app import launch_ui  
+# from src.ui.app import launch_ui  
 
 from src.finetune.sft_trainer import SFTTrainer
 
@@ -16,14 +16,14 @@ agent = TravelAgent()
 # launch_ui(agent)
 
 
-agent.chat()
+# agent.chat()
 
 
 
 args = SFTArguments()  # 使用parse_args获取参数
 trainer = SFTTrainer(args = args)
 
-processor = TravelQAProcessor()
+processor = TravelQAProcessor(trainer.tokenizer)
 
 processor.load_dataset_from_hf(DATA_PATH)
 
@@ -33,9 +33,11 @@ processed_data = processor.prepare_training_features()
 
 
 
+keys = list(processed_data.keys())
 
+print("keys = ", keys)
 
 trainer.train(
-    train_dataset=processed_data["train"],
-    eval_dataset=processed_data["test"]
+    train_dataset=processed_data["train"][:250],
+    eval_dataset=processed_data["train"][250:]
 )

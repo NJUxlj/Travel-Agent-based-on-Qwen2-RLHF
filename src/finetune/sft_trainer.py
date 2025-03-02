@@ -19,9 +19,9 @@ from peft import PeftModel
 import sys
 sys.path.append("../../")  # 添加上级目录的上级目录到sys.path
 sys.path.append("../")
-from configs.config import MODEL_CONFIG, BATCH_SIZE, DEEPSPEED_CONFIG_PATH
-from models.model import TravelAgent
-from utils.utils import (
+from src.configs.config import MODEL_CONFIG, BATCH_SIZE, DEEPSPEED_CONFIG_PATH
+from src.models.model import TravelAgent
+from src.utils.utils import (
     parse_args,
     get_max_length_from_model,
     check_deepspeed_env,
@@ -31,7 +31,7 @@ from utils.utils import (
     monitor_memory
 )
 
-from data.data_processor import DataProcessor, CrossWOZProcessor
+from src.data.data_processor import DataProcessor, CrossWOZProcessor
 from contextlib import contextmanager
 
 
@@ -156,7 +156,7 @@ class SFTTrainer:
             warmup_ratio=0.03,  
             lr_scheduler_type="cosine",  
             # 改用 bf16 而不是 fp16，因为 bf16 数值稳定性更好  
-            bf16=False,  # 修改这里  
+            bf16=True,  # 修改这里  
             fp16=False, # 关闭 fp16 
             # fp16=True,  
             logging_steps=100,  

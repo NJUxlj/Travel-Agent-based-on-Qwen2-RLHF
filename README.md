@@ -17,6 +17,16 @@ pip install -r requirements.txt
 ```
 
 
+## Download dataset
+```bash
+
+cd src/data
+
+huggingface-cli download --resume-download JasleenSingh91/travel-QA --local-dir travel-QA
+
+
+```
+
 ## Data Example Format
 - `JasleenSingh91/travel-QA`
 ```Plain Text

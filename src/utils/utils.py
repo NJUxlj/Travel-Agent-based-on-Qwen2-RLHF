@@ -21,7 +21,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from torch.utils.data import DataLoader, DistributedSampler
 
-from models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
+from src.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
 
 from datasets import (
     Dataset,
@@ -70,7 +70,7 @@ import sys
 import sys
 sys.path.append("../../")  # 添加上级目录的上级目录到sys.path
 sys.path.append("../")
-from configs.config import MODEL_CONFIG, MODEL_PATH
+from src.configs.config import MODEL_CONFIG, MODEL_PATH
 
 
 # 设置环境变量以启用显存优化  
@@ -93,7 +93,7 @@ class SFTArguments:
 
 def parse_args():
     parser = argparse.ArgumentParser(description="SFT Trainer Arguments")
-    parser.add_argument("--model_name", type=str, required=True, help="基础模型名称", default = "/root/autodl-tmp/models/Qwen2.5-1.5B" )
+    parser.add_argument("--model_name", type=str, required=True, help="基础模型名称", default = MODEL_PATH )
     parser.add_argument("--output_dir", type=str, required=True, help="输出目录", default = "output" )
     parser.add_argument("--device", type=str, default="cuda", help="设备")
     parser.add_argument("--device_map", type=str, default="auto", help="设备映射策略")
