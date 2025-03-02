@@ -19,7 +19,7 @@ from peft import PeftModel
 import sys
 sys.path.append("../../")  # 添加上级目录的上级目录到sys.path
 sys.path.append("../")
-from configs.config import MODEL_CONFIG, BATCH_SIZE
+from configs.config import MODEL_CONFIG, BATCH_SIZE, DEEPSPEED_CONFIG_PATH
 from models.model import TravelAgent
 from utils.utils import (
     parse_args,
@@ -167,7 +167,7 @@ class SFTTrainer:
             load_best_model_at_end=True,  
             report_to="tensorboard",  
             # DeepSpeed配置  
-            deepspeed="ds_config.json",  
+            deepspeed=DEEPSPEED_CONFIG_PATH,  
             # 分布式训练配置  
             local_rank=int(os.getenv("LOCAL_RANK", -1)),  
             ddp_find_unused_parameters=False,  
