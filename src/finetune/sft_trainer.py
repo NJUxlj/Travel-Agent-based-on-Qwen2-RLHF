@@ -434,14 +434,17 @@ class SFTTrainer:
         bleu = evaluate.load("bleu")  
         bleu_results = bleu.compute(  
             predictions=decoded_preds,  
-            references=[[l] for l in decoded_labels]  
+            references=[[l] for l in decoded_labels] ,
+            # max_order=4,  
+            # smooth=True  # 启用平滑处理  
         )  
         
         # 返回平均指标  
         return {  
             "rouge1": np.mean(results["rouge1"]),  
             "rouge2": np.mean(results["rouge2"]),  
-            "rougeL": np.mean(results["rougeL"])  
+            "rougeL": np.mean(results["rougeL"]),
+            "bleu": bleu_results["bleu"]  
         }  
 
 

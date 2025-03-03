@@ -151,6 +151,13 @@ configs:
 
 
 
+## SFT Evaluation Result
+```Plain Text
+Epoch  Rouge1   Rouge2  RougeL  BLEU
+
+
+```
+
 
 ## Citation
 - we refer to many other projects when building this project.

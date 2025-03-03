@@ -731,10 +731,8 @@ class TravelQAProcessor(DataProcessor):
         if not hasattr(self, 'dataset'):
             raise ValueError("请先加载数据集")
             
-        lengths = [len(self.tokenizer.encode(sample['Question'])) 
-                  for sample in self.dataset['train']] + \
-                [len(self.tokenizer.encode(sample['Response'])) 
-                        for sample in self.dataset['train']]
+        lengths = [len(self.tokenizer.encode(sample['Question']+sample['Response'])) 
+                  for sample in self.dataset['train']] 
         return sum(lengths) // len(lengths)
     
     def get_max_sample_length(self):
@@ -747,11 +745,9 @@ class TravelQAProcessor(DataProcessor):
         if not hasattr(self, 'dataset'):
             raise ValueError("请先加载数据集")
             
-        lengths = [len(self.tokenizer.encode(sample['Question'])) 
-                  for sample in self.dataset['train']] + \
-                [len(self.tokenizer.encode(sample['Response'])) 
-                        for sample in self.dataset['train']]
-        return max(lengths)
+        lengths =lengths = [len(self.tokenizer.encode(sample['Question']+sample['Response'])) 
+                  for sample in self.dataset['train']] 
+        return int(max(lengths))
     
     def get_75percent_sample_length(self):
         """
@@ -763,10 +759,8 @@ class TravelQAProcessor(DataProcessor):
         if not hasattr(self, 'dataset'):
             raise ValueError("请先加载数据集")
             
-        lengths = [len(self.tokenizer.encode(sample['Question'])) 
-                  for sample in self.dataset['train']] + \
-                [len(self.tokenizer.encode(sample['Response'])) 
-                        for sample in self.dataset['train']]
+        lengths = [len(self.tokenizer.encode(sample['Question']+sample['Response'])) 
+                  for sample in self.dataset['train']] 
         return np.percentile(lengths, 75)
     
     
@@ -781,10 +775,8 @@ class TravelQAProcessor(DataProcessor):
             raise ValueError("请先加载数据集")
             
         # 计算所有样本的长度
-        lengths = [len(self.tokenizer.encode(sample['Question'])) 
-                  for sample in self.dataset['train']] + \
-                [len(self.tokenizer.encode(sample['Response'])) 
-                        for sample in self.dataset['train']]
+        lengths = [len(self.tokenizer.encode(sample['Question']+sample['Response'])) 
+                  for sample in self.dataset['train']] 
         
         # 定义长度区间
         bins = [0, 50, 100, 150, 200, 300, 400, 500, 600, 800, 1000, 1200, 1500, 2000]
@@ -807,15 +799,15 @@ class TravelQAProcessor(DataProcessor):
         
         if split == None:
             dataset = {
-                k:v.select(range(500)) for k,v in dataset.items()
+                k:v.select(range(2000)) for k,v in dataset.items()
             }
             
             self.dataset = DatasetDict(dataset)
         else:
-            self.dataset = DatasetDict({split: dataset.select(range(500))}) 
+            self.dataset = DatasetDict({split: dataset.select(range(2000))}) 
 
     
-        self.max_length = self.get_avg_sample_length()
+        self.max_length = self.get_max_sample_length()
         print("average sample length = ", self.max_length)
         return self.dataset
         
@@ -919,6 +911,52 @@ class TravelQAProcessor(DataProcessor):
                 'labels': tokenized_labels['input_ids'].tolist()  
             }  
             
+            
+            
+        def _prepare_examples(examples):
+            
+            # 统一系统提示模板  
+            SYSTEM_PROMPT = "你是一个旅行助手，请根据问题给出专业回答。"  
+            # 构建完整对话序列  
+            inputs = [  
+                f"{SYSTEM_PROMPT}\nQuestion: {q}\nAnswer: {a}{self.tokenizer.eos_token}"  
+                for q, a in zip(examples['Question'], examples['Response'])  
+            ]  
+            
+            # 统一编码  
+            tokenized = self.tokenizer(  
+                inputs,  
+                max_length=self.max_length,  
+                truncation=True,  
+                padding="longest",  # 动态填充  
+                return_tensors="pt",  
+                add_special_tokens=True  
+            )  
+            
+            # 创建标签（将问题部分设为-100）  
+            labels = tokenized["input_ids"].clone()  
+            # 计算问题部分的token长度  
+            question_lengths = [  
+                len(self.tokenizer(  
+                    f"{SYSTEM_PROMPT}\nQuestion: {q}\nAnswer:",  
+                    add_special_tokens=False  
+                ).input_ids)  
+                for q in examples['Question']  
+            ]  
+            
+            # 将问题部分的标签设为-100  
+            for i, q_len in enumerate(question_lengths):  
+                labels[i, :q_len] = -100  
+                
+            # 处理填充token  
+            labels[labels == self.tokenizer.pad_token_id] = -100  
+            
+            return {  
+                "input_ids": tokenized["input_ids"],  
+                "attention_mask": tokenized["attention_mask"],  
+                "labels": labels  
+            }  
+            
         # return self.dataset.map(
         #     _prepare_single_sample,
         #     remove_columns=self.dataset['train'].column_names,
@@ -929,7 +967,7 @@ class TravelQAProcessor(DataProcessor):
         
         return DatasetDict({  
             split: ds.map(  
-                _prepare_batch_samples,  
+                _prepare_examples,  
                 remove_columns=ds.column_names,  # 使用当前split的列名  
                 # load_from_cache_file=True,
                 batched=True,  # 启用批处理  

@@ -10,6 +10,8 @@ from urllib.parse import quote_plus
 import time
 import random
 
+from prompt_template import PromptTemplate
+
 
 
 # os.environ['https_proxy'] = 'http://127.0.0.1:7890'
@@ -26,6 +28,8 @@ class ToolDispatcher:
                 search_engine_id=CUSTOM_SEARCH_ENGINE_ID  
             ),
         }  
+        
+        self.prompt_template = PromptTemplate()
     
     def parse_tool_call(self, tool_str: str) -> Dict:  
         """解析工具调用字符串"""  
@@ -57,6 +61,22 @@ class ToolDispatcher:
         executor = self.executors.get(parsed["tool"])  
         if not executor:  
             return {"error": "Tool not registered"}  
+        
+        # 获取工具参数规范  
+        tool_template = self.prompt_template.tools.get(parsed["tool"])  
+        if not tool_template:  
+            return {"error": "Tool template not found"}  
+        
+        
+        # 参数类型校验  
+        for param in tool_template.parameters:  
+            if param.required and param.name not in parsed["args"]:  
+                return {"error": f"Missing required parameter: {param.name}"}  
+            if param.name in parsed["args"]:  
+                expected_type = param.type  
+                actual_value = parsed["args"][param.name]  
+                if not isinstance(actual_value, eval(expected_type)):  
+                    return {"error": f"Type mismatch for {param.name}, expected {expected_type}"}  
         
         print( "parse_args = ", parsed["args"])
         

@@ -43,6 +43,6 @@ keys = list(processed_data.keys())
 print("keys = ", keys)
 
 trainer.train(
-    train_dataset=processed_data["train"].select(range(250)),
-    eval_dataset=processed_data["train"].select(range(250,300))
+    train_dataset=processed_data["train"].select(range(50)),
+    eval_dataset=processed_data["train"].select(range(50,80))
 )

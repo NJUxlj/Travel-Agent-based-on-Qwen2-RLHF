@@ -28,6 +28,11 @@ class RAG():
     
     
     
+    def rag_chat(self,):
+        pass
+    
+    
+    
     
     
     def summarize_results(self, results:Dict)->str:
