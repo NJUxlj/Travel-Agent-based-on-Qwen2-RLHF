@@ -5,10 +5,51 @@ from typing import Dict, List, Optional, Tuple
 from src.models.model import TravelAgent
 from src.data.data_processor import CrossWOZProcessor
 
+
+
+
+from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain  
+from langchain.memory.buffer import ConversationBufferMemory  
+from langchain_community.vectorstores import Chroma      # pip install langchain-chroma  pip install langchain_community
+from langchain_core.prompts import ChatPromptTemplate  
+from langchain_core.runnables import RunnablePassthrough  
+from langchain_core.output_parsers import StrOutputParser  
+from langchain.embeddings import HuggingFaceEmbeddings  
+
+
+'''
+建议检查Pydantic版本兼容性，推荐使用：
+
+pip install pydantic>=2.5.0  
+
+'''
+
 from datasets import load_dataset
 import chromadb
+from chromadb.utils.embedding_functions import EmbeddingFunction  
+import re
+import torch
 
-from src.configs.config import RAG_DATA_PATH, SFT_MODEL_PATH
+from src.configs.config import RAG_DATA_PATH, SFT_MODEL_PATH, EMBEDDING_MODEL_PATH
+
+
+
+
+
+class LocalEmbeddingFunction(EmbeddingFunction):  
+    """本地嵌入模型适配器"""  
+    def __init__(self, model_name: str = EMBEDDING_MODEL_PATH):  
+        self.embedder = HuggingFaceEmbeddings(  
+            model_name=model_name,  
+            model_kwargs={'device': 'cuda' if torch.cuda.is_available() else 'cpu'},  
+            encode_kwargs={'normalize_embeddings': True}  
+        )  
+
+    def __call__(self, texts: List[str]) -> List[List[float]]:  
+        return self.embedder.embed_documents(texts)  
+
+
+
 
 
 class RAG():
@@ -16,6 +57,7 @@ class RAG():
         self, 
         agent: TravelAgent,
         dataset_name_or_path:str = RAG_DATA_PATH,
+        embedding_model_name_or_path:str = EMBEDDING_MODEL_PATH,
         use_langchain = False,
         use_prompt_template = True,
         use_db = True
@@ -26,15 +68,25 @@ class RAG():
         self.agent = agent
         
         if use_db:
+            self.embedding_fn = LocalEmbeddingFunction(model_name=embedding_model_name_or_path)
             self.chroma_client = chromadb.Client()
             # self.chroma_client = chromadb.PersistentClient(path = "local dir")
             
             self.collection = self.chroma_client.create_collection(
                 name="my_collection",
+                embedding_function=self.embedding_fn,
                 metadata={
-                    "hnsw:space":"cosine"
+                    "hnsw:space":"cosine",
+                    "embedding_model": embedding_model_name_or_path
                 })
             self.dataset =  load_dataset(dataset_name_or_path, split="train").select(range(1000))
+            
+            self.embeddings = HuggingFaceEmbeddings(   # langchain 专用
+                model_name=EMBEDDING_MODEL_PATH
+            )  
+            
+            # 加载数据集时自动生成嵌入  
+            self._initialize_database() 
         
         
         if self.use_prompt_template:
@@ -42,38 +94,65 @@ class RAG():
             self.dispatcher = ToolDispatcher()
     
     
-    def parse_db(self):
-        assert self.use_db, "The embedding database is not initialized."
-        result = []
+    # def parse_db(self):
+    #     assert self.use_db, "The embedding database is not initialized."
+    #     result = []
         
-        for sample in self.dataset:
-            result.append(sample["history"])
+    #     for sample in self.dataset:
+    #         result.append(sample["history"])
             
-        return result
+    #     return result
+    
+    
+    
+    def _initialize_database(self):  
+        """使用本地嵌入模型初始化数据库"""  
+        batch_size = 100  
+        for i in range(0, len(self.dataset), batch_size):  
+            batch = self.dataset[i:i+batch_size]  
+            documents = [item["history"] for item in batch]  
+            metadatas = [{"source": "crosswoz"}] * len(documents)  
+            ids = [str(idx) for idx in range(i, i+len(documents))]  
+            
+            self.collection.add(  
+                documents=documents,  
+                metadatas=metadatas,  
+                ids=ids  
+            )  
         
     
     
     def query_db(self, user_query:str, n_results=5)->List[str]:
         assert self.use_db, "The embedding database is not initialized."
-        corpus = self.parse_db()
         
-        ids = [f"id{i+1}" for i in range(len(corpus))]
+        # 使用本地模型生成查询嵌入  
+        query_embedding = self.embedding_fn([user_query])[0]
         
-        self.collection.add(
-            documents = corpus,
-            # metadatas = [{"source": "my_source"}, {"source": "my_source"}],
-            ids = ids
-        )
+        # corpus = self.parse_db()
+        # ids = [f"id{i+1}" for i in range(len(corpus))]
+        
+        # self.collection.add(
+        #     documents = corpus,
+        #     # metadatas = [{"source": "my_source"}, {"source": "my_source"}],
+        #     ids = ids
+        # )
         
         results = self.collection.query(
-            # query_embeddings = [[11.1, 12.1, 13.1], [1.1, 2.3, 3.2]],
-            query_texts= [user_query],
+            query_embeddings = [query_embedding],
+            # query_texts= [user_query],
             n_results = n_results,
             # where = {"metadata_field": "is_equal_to_this"},
             # where_document = {"$contains": "search_string"}
+            include=["documents", "distances"] 
         )
         
-        return results["documents"][0]
+        # 添加相似度阈值过滤  
+        filtered = [  
+            doc for doc, dist in zip(results["documents"][0], results["distances"][0])  
+            if 1 - dist > 0.7  # cosine距离转相似度  
+        ]  
+        
+        return filtered
         
     
     
@@ -142,10 +221,97 @@ class RAG():
     
     
     def langchain_rag_chat(self):
-        pass
+        """完全基于LangChain API实现的增强版对话"""  
+        print("============ LangChain RAG Chat 启动 ===========")  
+        
+        
+        # 初始化LangChain组件  
+        memory = ConversationBufferMemory(  
+            return_messages=True,   
+            output_key="answer",  
+            memory_key="chat_history"  
+        )  
+        
+        # 创建检索器（使用已初始化的Chroma集合）  
+        retriever = Chroma(  
+            client=self.chroma_client,  
+            collection_name="my_collection",  
+            embedding_function=self.embeddings  # 需补充实际embedding模型  
+        ).as_retriever(search_kwargs={"k": 5})   # 设置每次检索返回最相关的5个结果
+        
+        # 构建工具调用链  
+        tool_chain = (  
+            RunnablePassthrough.assign(  
+                context=lambda x: retriever.get_relevant_documents(x["question"])  
+            )  
+            | self._build_tool_prompt()  
+            | self.agent.model  # 假设已适配LangChain接口  
+            | StrOutputParser()  
+        )  
+        
+        
+        # 启动对话循环  
+        while True:  
+            user_input = input("User: ")  
+            if user_input.lower() == "exit":  
+                print("Goodbye!")  
+                break  
+            
+            response = tool_chain.invoke({  
+                "question": user_input,  
+                "chat_history": memory.load_memory_variables({})["chat_history"]  
+            })  
+            
+            # 解析工具调用  
+            tool_result = self._process_langchain_response(response)  
+            memory.save_context({"input": user_input}, {"output": tool_result})  
+            
+            print(f"Assistant: {tool_result}")  
+            print("=============================================")  
     
     
-    
+    def _build_tool_prompt(self):  
+        """构建集成工具和context的提示模板""" 
+        
+        return ChatPromptTemplate.from_template("""  
+            结合以下上下文和工具调用结果回答问题：  
+            
+            上下文信息：  
+            {context}  
+            
+            历史对话：  
+            {chat_history}  
+            
+            用户问题：{question}  
+            
+            请按以下格式响应：  
+            {tool_format}  
+            """).partial(  
+                tool_format=self.prompt_template.generate_prompt("", "")  
+            )  
+            
+    def _process_langchain_response(self, response: str) -> str:  
+        """处理LangChain输出并执行工具调用"""  
+        try:  
+            # 添加工具调用频率限制  
+            if len(re.findall(r"<工具调用>", response)) > 10:  
+                return "检测到过多工具调用，请简化您的问题"
+            
+            # 解析工具调用字符串  
+            tool_call = re.search(r"<工具调用>(.*?)</工具调用>", response, re.DOTALL)  
+            if not tool_call:  
+                return response  
+
+            # 执行工具调用  
+            result = self.dispatcher.execute(tool_call.group(1).strip())  
+            
+            # 数据库查询不应该在这里
+            db_result = self.query_db(tool_call.group(1)) if self.use_db else ""  
+            
+            return f"{response}\n\n工具执行结果：{result}\n数据库匹配结果：{db_result}"  
+        
+        except Exception as e:  
+            return f"Error processing response: {str(e)}"  
     
     
     def summarize_results(self, results:Dict)->str:

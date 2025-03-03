@@ -4,6 +4,48 @@ from src.agents.tools import ToolDispatcher
 from src.models.model import TravelAgent  
 from src.configs.config import RAG_DATA_PATH, SFT_MODEL_PATH  
 
+import pandas as pd  
+import matplotlib.pyplot as plt  
+from typing import Dict 
+
+from src.finetune.sft_trainer import SFTTrainer
+
+
+
+class TrainingMonitor:  
+    """实时训练监控器"""  
+    def __init__(self):  
+        self.loss_history = []  
+        self.metric_history = []  
+        self.current_step = 0  
+
+    def update(self, logs: Dict):  
+        if "loss" in logs:  
+            self.loss_history.append((self.current_step, logs["loss"]))  
+        if "metrics" in logs:  
+            self.metric_history.append((self.current_step, logs["metrics"]))  
+        self.current_step += 1  
+
+    def get_loss_plot(self):  
+        df = pd.DataFrame(self.loss_history, columns=["step", "loss"])  
+        return gr.LinePlot(  
+            df,  
+            x="step",  
+            y="loss",  
+            title="训练损失曲线",  
+            width=400,  
+            height=300  
+        )  
+
+    def get_latest_metrics(self):  
+        if not self.metric_history:  
+            return "等待首次评估..."  
+        return pd.DataFrame(  
+            self.metric_history[-1][1],  
+            index=["最新指标"]  
+        )  
+
+
 
 # 初始化RAG系统  
 def initialize_rag():  
@@ -19,6 +61,10 @@ def initialize_rag():
 
 # 创建Gradio界面组件  
 def create_demo(rag:RAG):  
+    
+    
+    monitor = TrainingMonitor() 
+    
     with gr.Blocks(title="Travel RAG Assistant", theme=gr.themes.Soft()) as demo:  
         gr.Markdown("# 🌍 智能旅行规划助手") 
         
@@ -26,7 +72,7 @@ def create_demo(rag:RAG):
         # 聊天界面  
         with gr.Row():  
             with gr.Column(scale=2):  
-                chatbot = gr.Chatbot(height=600, label="对话记录")  
+                chatbot = gr.Chatbot(height=450, label="对话记录")  
                 query_box = gr.Textbox(  
                     placeholder="输入您的旅行问题...",  
                     label="用户输入",  
@@ -62,12 +108,48 @@ def create_demo(rag:RAG):
                         max_lines=12,  
                         label="完整响应"  
                     )  
+            
+            # 新增微调控制面板  
+            with gr.Column(scale=1):  
+                with gr.Tab("模型微调"):  
+                    with gr.Accordion("训练参数配置", open=True):  
+                        learning_rate = gr.Slider(  
+                            minimum=1e-6,  
+                            maximum=1e-3,  
+                            value=2e-4,  
+                            step=1e-6,  
+                            label="学习率"  
+                        )  
+                        num_epochs = gr.Slider(  
+                            minimum=1,  
+                            maximum=10,  
+                            value=3,  
+                            step=1,  
+                            label="训练轮数"  
+                        )  
+                        batch_size = gr.Slider(  
+                            minimum=1,  
+                            maximum=32,  
+                            value=4,  
+                            step=1,  
+                            label="批大小"  
+                        )  
+
+            
+            
                     
         # 控制按钮  
         with gr.Row():  
-            submit_btn = gr.Button("提交", variant="primary") 
+            submit_btn = gr.Button("提交", variant="primary")
             clear_btn = gr.Button("清空对话")
-            
+        
+        with gr.Row():
+            with gr.Accordion("语言设置", open=False):  
+                lang = gr.Dropdown(  
+                    choices=["中文", "English", "日本語"],  
+                    value="中文",  
+                    label="界面语言"  
+                )  
             
         # 处理逻辑  
         def respond(query, chat_history):  
