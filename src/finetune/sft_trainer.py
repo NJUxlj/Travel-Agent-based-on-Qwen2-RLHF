@@ -1,6 +1,9 @@
 from typing import Dict, Optional
 import os
 import torch
+import swanlab
+from swanlab.integration.huggingface import SwanLabCallback
+import numpy as np
 import evaluate
 import deepspeed
 import transformers
@@ -13,13 +16,21 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer
 )
+
+from transformers import TrainerCallback  
 from peft import PeftModel
 
 
 import sys
 sys.path.append("../../")  # 添加上级目录的上级目录到sys.path
 sys.path.append("../")
-from src.configs.config import MODEL_CONFIG, BATCH_SIZE, DEEPSPEED_CONFIG_PATH
+from src.configs.config import (
+    MODEL_CONFIG, 
+    BATCH_SIZE, 
+    DEEPSPEED_CONFIG_PATH,
+    SFT_MODEL_PATH,
+    SFT_DPO_MODEL_PATH
+)
 from src.models.model import TravelAgent
 from src.utils.utils import (
     parse_args,
@@ -35,7 +46,7 @@ from src.data.data_processor import DataProcessor, CrossWOZProcessor
 from contextlib import contextmanager
 
 
-MODEL_PATH = "/root/autodl-tmp/models/Qwen2.5-1.5B"
+# MODEL_PATH = "/root/autodl-tmp/models/Qwen2.5-1.5B"
 
 
 '''
@@ -61,6 +72,12 @@ deepspeed --num_gpus 2 sft_trainer.py \
     --deepspeed ds_config.json
 
 '''
+
+
+
+class MemoryCallback(TrainerCallback):  
+    def on_step_end(self, args, state, control, **kwargs):  
+        monitor_memory() 
 
 class CustomTrainer(Trainer):  
     @contextmanager  
@@ -89,16 +106,17 @@ class SFTTrainer:
     """
     def __init__(
         self,
+        travel_agent: TravelAgent = None,
         # model_name: str,
-        # output_dir: str,
+        output_dir: str = SFT_MODEL_PATH,
         training_args: Optional[TrainingArguments] = None,
         # device = "auto",
         # device_map = 'auto',
         lora_config: Optional[Dict] = None,
-        use_bnb = False, # 无法直接微调量化后的模型
         use_lora = False,
-        max_length = 1024,
-        args = None
+        max_length = 50,
+        local_rank = -1,
+        args: SFTArguments = None
     ):
         """
         初始化训练器
@@ -114,33 +132,46 @@ class SFTTrainer:
             raise ValueError("DeepSpeed is not installed or not configured correctly.")
         
         
-        self.model_name = args.model_name
-        self.output_dir = args.output_dir
-        self.device = args.device
-        self.device_map = args.device_map
-        self.local_rank = args.local_rank
-        
-        self.use_bnb = use_bnb
-        self.use_lora = use_lora
-        self.max_length= max_length
-        
-        if self.local_rank!=-1:
-            self.device = torch.device("cuda", self.local_rank)
-        else:
+        if travel_agent is None:
+            self.model_name = args.model_name
+            self.output_dir = args.output_dir
             self.device = args.device
-        
+            self.device_map = args.device_map
+            self.local_rank = args.local_rank
+            self.use_lora = use_lora
+            self.lora_config = lora_config
+        else:
+            self.model_name = travel_agent.model_name
+            self.output_dir = output_dir
+            self.device = travel_agent.device
+            self.device_map = travel_agent.device_map
+            self.local_rank = local_rank
+            self.use_lora = travel_agent.use_lora
+            self.lora_config  = travel_agent.lora_config
+            
+            
+            
         # 加载模型和分词器 # 添加LoRA
         self.agent=TravelAgent(
             model_name=self.model_name,
             device=self.device,
             device_map=self.device_map,
             lora_config=lora_config,
-            use_bnb=self.use_bnb,
             use_lora = self.use_lora,
-        )
+        ) if travel_agent is None else travel_agent
+        
+        
+
+        self.max_length= max_length
+        
+        if self.local_rank!=-1:
+            self.device = torch.device("cuda", self.local_rank)
+        else:
+            self.device = self.agent.model.device
+        
         
         self.model = self.agent.model
-        self.max_length = get_max_length_from_model(self.model)
+        # self.max_length = get_max_length_from_model(self.model)
         self.tokenizer = self.agent.tokenizer
         
         '''
@@ -153,7 +184,7 @@ class SFTTrainer:
         # 设置默认训练参数
         default_training_args = TrainingArguments(  
             output_dir=self.output_dir,  
-            num_train_epochs=3,  
+            num_train_epochs=5,  
             per_device_train_batch_size=1,  # 每个GPU上的batch size
             per_device_eval_batch_size=1,  
             gradient_accumulation_steps=4,  
@@ -166,13 +197,17 @@ class SFTTrainer:
             bf16=True,  # 修改这里  
             fp16=False, # 关闭 fp16 
             # fp16=True,  
+            logging_dir="./logs",  # 指定日志目录  
+            logging_strategy="steps",  
             logging_steps=100,  
+            logging_first_step=True,  
+            report_to="none",  # 已经在回调函数中配置了 SwanLab
             save_steps=100,  
             eval_steps=100,  
             save_total_limit=3,  
             evaluation_strategy="steps",  
             load_best_model_at_end=True,  
-            report_to="tensorboard",  
+            # report_to="tensorboard",  
             # DeepSpeed配置  
             deepspeed=DEEPSPEED_CONFIG_PATH,  
             # 分布式训练配置  
@@ -190,7 +225,7 @@ class SFTTrainer:
         
         check_deepspeed_config(self.training_args)
     
-
+ 
     
     def train(
         self,
@@ -206,6 +241,16 @@ class SFTTrainer:
             eval_dataset: 评估数据集
             resume_from_checkpoint: 恢复训练的检查点路径
         """
+        swanlab_callback = SwanLabCallback(
+            project="qwen2-sft",
+            log_dir = "./swanlab_logs",
+            experiment_name="Qwen2-0.5B",
+            description="使用通义千问Qwen2-0.5B模型在travel_qa数据集上微调。",
+            config={
+                "model": "qwen/Qwen2-0.5B",
+                "dataset": "travel_qa",
+            }
+        )
         
         # 数据整理器  
         data_collator = DataCollatorForSeq2Seq(  
@@ -239,7 +284,9 @@ class SFTTrainer:
                 transformers.EarlyStoppingCallback(  
                     early_stopping_patience=3,  
                     early_stopping_threshold=0.01  
-                )  
+                ),
+                MemoryCallback(),
+                swanlab_callback
             ]  
         )
         
@@ -249,9 +296,18 @@ class SFTTrainer:
         trainer.train(resume_from_checkpoint=resume_from_checkpoint)
         
         # 只在主进程保存模型  
-        if args.local_rank in [-1, 0]:  
-            trainer.save_model()
-            self.tokenizer.save_pretrained(self.output_dir)
+        if self.local_rank in [-1, 0]: 
+            # 检查输出目录是否存在  
+            os.makedirs(self.output_dir, exist_ok=True)   
+            trainer.save_model(self.output_dir)
+            # self.tokenizer.save_pretrained(self.output_dir)
+            
+            # 方案2
+            # self.model.save_pretrained(  
+            #     self.output_dir,  
+            #     safe_serialization=True  # 使用安全序列化  
+            # )  
+
         
         return trainer
     
@@ -295,20 +351,98 @@ class SFTTrainer:
         
         return model, tokenizer
     
-    def compute_metrics(self, eval_pred):  
-        # 计算评估指标  
-        metric = evaluate.load("perplexity")  
+    # def compute_metrics(self, eval_pred):  
+    #     # 计算评估指标  
+    #     metric = evaluate.load("perplexity")  
         
-        predictions, labels = eval_pred  
-        # 去除padding的影响  
-        mask = labels != -100  
-        predictions = predictions[mask]  
-        labels = labels[mask]  
+    #     predictions, labels = eval_pred  
+    #     # 去除padding的影响  
+    #     mask = labels != -100  
+    #     predictions = predictions[mask]  
+    #     labels = labels[mask]  
         
-        return metric.compute(predictions=predictions, references=labels)  
+    #     return metric.compute(predictions=predictions, references=labels)  
     
     
-    
+    def compute_metrics(self, eval_pred):
+        # 计算评估指标
+        # 确保获取tokenizer实例  
+        tokenizer = self.tokenizer
+        
+        tokenizer.pad_token_id = tokenizer.eos_token_id  
+        
+        # 分离预测和标签  
+        predictions, labels = eval_pred  # labels.shape = (batch_size, max_length)
+        
+        # 处理预测结果  
+        pred_ids = np.argmax(predictions, axis=-1)  
+        
+        print("pred_ids = ")
+        
+        unique_tokens, counts = np.unique(pred_ids, return_counts=True)  
+        print("预测token分布:", list(zip(unique_tokens[:5], counts[:5])))  # 显示前5个高频token  
+
+
+        # 检查是否全为pad_token  
+        if (pred_ids == tokenizer.pad_token_id).all():  
+            print("警告：所有预测都是pad token！")  
+            
+        decoded_preds = tokenizer.batch_decode(  
+            pred_ids,  
+            skip_special_tokens=True,  
+            clean_up_tokenization_spaces=True  
+        )  
+        
+        print("labels.shape = ", labels.shape) # (50, 512)
+        
+        label_ids = np.where(labels[0] != -100, labels[0], tokenizer.pad_token_id)  
+        print("标签样例 label_ids:", label_ids)  # 应该显示完整答案  
+        
+        
+        # 处理标签（过滤填充值-100）  
+        decoded_labels = []  
+        for label_seq in labels:  
+            # 将-100替换为pad_token_id  
+            valid_label_ids = np.where(label_seq != -100, label_seq, tokenizer.pad_token_id)  
+            decoded_label = tokenizer.decode(  
+                valid_label_ids,  
+                skip_special_tokens=True,  
+                clean_up_tokenization_spaces=True  
+            )  
+            
+            decoded_labels.append(decoded_label)  
+            
+            
+        # 打印前3个样本的输入输出  
+        print("\n===== 调试样例 =====")  
+        for i in range(3):  
+            print(f"样本 {i+1}:")  
+            print(f"预测: {decoded_preds[i]}")  
+            print(f"参考: {decoded_labels[i]}")  
+            print("-------------------")  
+        
+        # 计算ROUGE-L分数（示例）  
+        rouge = evaluate.load("rouge")  
+        results = rouge.compute(  
+            predictions=decoded_preds,  
+            references=decoded_labels,  
+            use_stemmer=True,  
+            use_aggregator=False  # 获取每个样本的分数  
+        )  
+        
+        # 添加BLEU指标  
+        bleu = evaluate.load("bleu")  
+        bleu_results = bleu.compute(  
+            predictions=decoded_preds,  
+            references=[[l] for l in decoded_labels]  
+        )  
+        
+        # 返回平均指标  
+        return {  
+            "rouge1": np.mean(results["rouge1"]),  
+            "rouge2": np.mean(results["rouge2"]),  
+            "rougeL": np.mean(results["rougeL"])  
+        }  
 
 
 if __name__ == "__main__":

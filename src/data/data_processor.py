@@ -707,12 +707,13 @@ class CrossWOZProcessor(DataProcessor):
 class TravelQAProcessor(DataProcessor):
     def __init__(self,
         tokenizer: PreTrainedTokenizer,
-        max_length: int = 1024,
+        max_length: int = 50,
         system_prompt: str = "You are a helpful AI travel agent. Help users plan their trips and provide travel advice.",
         ):  
         super().__init__(tokenizer, max_length, system_prompt)
+        assert tokenizer.pad_token_id is not None, "Tokenizer必须设置pad_token"  
+        print(f"当前pad_token: {tokenizer.pad_token} (ID: {tokenizer.pad_token_id})")  
         
-    
     
     def _format_qa_pair(self):
         '''
@@ -720,6 +721,84 @@ class TravelQAProcessor(DataProcessor):
         '''
         pass
     
+    def get_avg_sample_length(self):
+        """
+        计算数据集中样本的平均长度
+        
+        Returns:
+            float: 平均长度
+        """
+        if not hasattr(self, 'dataset'):
+            raise ValueError("请先加载数据集")
+            
+        lengths = [len(self.tokenizer.encode(sample['Question'])) 
+                  for sample in self.dataset['train']] + \
+                [len(self.tokenizer.encode(sample['Response'])) 
+                        for sample in self.dataset['train']]
+        return sum(lengths) // len(lengths)
+    
+    def get_max_sample_length(self):
+        """
+        计算数据集中样本的最大长度
+        
+        Returns:
+            int: 最大长度
+        """
+        if not hasattr(self, 'dataset'):
+            raise ValueError("请先加载数据集")
+            
+        lengths = [len(self.tokenizer.encode(sample['Question'])) 
+                  for sample in self.dataset['train']] + \
+                [len(self.tokenizer.encode(sample['Response'])) 
+                        for sample in self.dataset['train']]
+        return max(lengths)
+    
+    def get_75percent_sample_length(self):
+        """
+        计算数据集中样本长度的75百分位值
+        
+        Returns:
+            float: 75百分位长度
+        """
+        if not hasattr(self, 'dataset'):
+            raise ValueError("请先加载数据集")
+            
+        lengths = [len(self.tokenizer.encode(sample['Question'])) 
+                  for sample in self.dataset['train']] + \
+                [len(self.tokenizer.encode(sample['Response'])) 
+                        for sample in self.dataset['train']]
+        return np.percentile(lengths, 75)
+    
+    
+    def get_sample_length_distribution(self):
+        """
+        获取数据集样本长度的分布情况
+        
+        Returns:
+            dict: 包含不同长度区间的样本数量统计
+        """
+        if not hasattr(self, 'dataset'):
+            raise ValueError("请先加载数据集")
+            
+        # 计算所有样本的长度
+        lengths = [len(self.tokenizer.encode(sample['Question'])) 
+                  for sample in self.dataset['train']] + \
+                [len(self.tokenizer.encode(sample['Response'])) 
+                        for sample in self.dataset['train']]
+        
+        # 定义长度区间
+        bins = [0, 50, 100, 150, 200, 300, 400, 500, 600, 800, 1000, 1200, 1500, 2000]
+        
+        # 统计每个区间的样本数量
+        hist, _ = np.histogram(lengths, bins=bins)
+        
+        # 构建返回结果
+        distribution = {}
+        for i in range(len(bins)-1):
+            key = f"{bins[i]}-{bins[i+1]}"
+            distribution[key] = int(hist[i])
+            
+        return distribution
     
     
     def load_dataset_from_hf(self, dataset_name_or_path, split = None)->DatasetDict|Dataset:
@@ -736,6 +815,8 @@ class TravelQAProcessor(DataProcessor):
             self.dataset = DatasetDict({split: dataset.select(range(500))}) 
 
     
+        self.max_length = self.get_avg_sample_length()
+        print("average sample length = ", self.max_length)
         return self.dataset
         
 
@@ -852,7 +933,7 @@ class TravelQAProcessor(DataProcessor):
                 remove_columns=ds.column_names,  # 使用当前split的列名  
                 # load_from_cache_file=True,
                 batched=True,  # 启用批处理  
-                batch_size=1,  # 根据内存调整  
+                batch_size=32,  # 根据内存调整  
             )  
             for split, ds in self.dataset.items()  
         })  

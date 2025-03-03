@@ -20,12 +20,15 @@ agent = TravelAgent()
 
 
 
-args = SFTArguments()  # 使用parse_args获取参数
-trainer = SFTTrainer(args = args)
+# args = SFTArguments()  # 使用parse_args获取参数
+trainer = SFTTrainer(travel_agent = agent)
 
-processor = TravelQAProcessor(trainer.tokenizer)
+processor = TravelQAProcessor(agent.tokenizer)
 
 processor.load_dataset_from_hf(DATA_PATH)
+
+trainer.max_length = processor.max_length
+print("trainer.max_length = ", trainer.max_length)
 
 
 
@@ -41,5 +44,5 @@ print("keys = ", keys)
 
 trainer.train(
     train_dataset=processed_data["train"].select(range(250)),
-    eval_dataset=processed_data["train"].select(range(250,500))
+    eval_dataset=processed_data["train"].select(range(250,300))
 )

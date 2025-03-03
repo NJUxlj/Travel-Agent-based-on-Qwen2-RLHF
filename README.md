@@ -17,13 +17,18 @@ pip install -r requirements.txt
 ```
 
 
-## Download dataset
+## Download SFT dataset
 ```bash
 
 cd src/data
 
 huggingface-cli download --resume-download JasleenSingh91/travel-QA --local-dir travel-QA
 
+
+```
+
+## Download RAG dataset
+```bash
 
 ```
 
@@ -119,6 +124,11 @@ configs:
     url={https://arxiv.org/abs/2002.11893}  
 }
 ```
+
+
+## SFT Running Snapshot
+![SFT](image/sft_snapshot.png)
+
 
 
 ## Travel Agent运行结果

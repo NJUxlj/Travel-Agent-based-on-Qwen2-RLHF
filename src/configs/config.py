@@ -21,7 +21,7 @@ BATCH_SIZE = 8
 NUM_PROCESSES = 2
 
 
-OUTPUT_DIR = "../../output/"
+OUTPUT_DIR = "output/"
 MODEL_PATH = "/root/autodl-tmp/models/Qwen2.5-0.5B"
 SFT_MODEL_NAME = "qwen2_sft"
 SFT_MODEL_PATH = os.path.join(OUTPUT_DIR, SFT_MODEL_NAME)
