@@ -26,7 +26,7 @@ class ToolTemplate:
         self.parameters = parameters  
         self.call_template = call_template  
 
-class PromptTemplate:  
+class MyPromptTemplate:  
     def __init__(self):  
         self.tools: Dict[str, ToolTemplate] = {
             

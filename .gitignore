@@ -1,6 +1,7 @@
 **/__pycache__/
 .gradio/
 src/data/travel_qa
+src/data/crosswoz-sft
 
 model_weights/
 outputs/

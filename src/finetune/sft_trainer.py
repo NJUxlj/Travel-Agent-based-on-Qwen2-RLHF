@@ -314,7 +314,7 @@ class SFTTrainer:
     @staticmethod
     def load_trained_model(
         base_model_name: str,
-        adapter_path: str,
+        adapter_path: str = None,
         device_map: str = "auto"
     ) -> tuple:
         """
@@ -342,12 +342,13 @@ class SFTTrainer:
             device_map=device_map
         ) 
         
-        # 加载LoRA权重
-        model = PeftModel.from_pretrained(
-            model,
-            adapter_path,
-            device_map=device_map
-        )
+        if adapter_path is not None:
+            # 加载LoRA权重
+            model = PeftModel.from_pretrained(
+                model,
+                adapter_path,
+                device_map=device_map
+            )
         
         return model, tokenizer
     

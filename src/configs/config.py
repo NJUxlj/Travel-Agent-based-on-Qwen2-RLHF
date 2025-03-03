@@ -23,6 +23,9 @@ NUM_PROCESSES = 2
 
 OUTPUT_DIR = "output/"
 MODEL_PATH = "/root/autodl-tmp/models/Qwen2.5-0.5B"
+
+EMBEDDING_MODEL_PATH = "/root/autodl-tmp/models/all-MiniLM-L6-v2"
+
 SFT_MODEL_NAME = "qwen2_sft"
 SFT_MODEL_PATH = os.path.join(OUTPUT_DIR, SFT_MODEL_NAME)
 
@@ -36,6 +39,7 @@ SFT_DPO_MODEL_PATH = os.path.join(OUTPUT_DIR, SFT_DPO_MODEL_NAME)
 
 
 DATA_PATH = "src/data/travel_qa"
+RAG_DATA_PATH = "src/data/crosswoz-sft"
 
 DEEPSPEED_CONFIG_PATH = "src/configs/ds_config.json"
 
