@@ -15,6 +15,11 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough  
 from langchain_core.output_parsers import StrOutputParser  
 from langchain.embeddings import HuggingFaceEmbeddings  
+from langchain_core.prompts import PromptTemplate
+
+from langchain.graphs import Neo4jGraph  
+from langchain.chains.graph_qa.cypher import GraphCypherQAChain
+# from langchain_experimental.graph_transformers import ChainMap     # pip install langchain_experimental
 
 
 '''
@@ -333,6 +338,154 @@ class RAG():
     
     
     
+    
+    
+    
+    def _initialize_knowledge_graph(self) -> Neo4jGraph:  
+        """构建知识图谱"""  
+        # 连接到Neo4j（示例配置，需根据实际修改）  
+        graph = Neo4jGraph(  
+            url="bolt://localhost:7687",  
+            username="neo4j",  
+            password="password"  
+        )  
+        
+        # 从文档中提取实体关系  
+        query = """  
+        UNWIND $documents AS doc  
+        CALL apoc.nlp.gcp.entities.analyze({  
+            text: doc.text,  
+            key: $apiKey,  
+            types: ["PERSON","LOCATION","ORGANIZATION"]  
+        }) YIELD value  
+        UNWIND value.entities AS entity  
+        MERGE (e:Entity {name: entity.name})  
+        SET e.type = entity.type  
+        WITH e, doc  
+        MERGE (d:Document {id: doc.id})  
+        MERGE (d)-[:CONTAINS]->(e)  
+        """  
+        
+        # 批量处理文档（示例）  
+        documents = [{"id": str(i), "text": d["history"]} for i, d in enumerate(self.dataset)]  
+        graph.query(query, params={"documents": documents, "apiKey": "your-gcp-key"})  
+        
+        return graph  
+    
+    
+    
+    def _build_graph_prompt(self) -> PromptTemplate:  
+        """构建图谱增强的提示模板"""  
+        return PromptTemplate.from_template("""  
+            结合知识图谱和文本上下文回答下列问题：  
+            
+            知识图谱路径：  
+            {graph_paths}  
+            
+            相关文本：  
+            {context}  
+            
+            历史对话：  
+            {chat_history}  
+            
+            问题：{question}  
+            
+            请按照以下要求回答：  
+            1. 明确提及相关实体  
+            2. 说明实体间的关系  
+            3. 保持回答简洁专业  
+            """)  
+        
+        
+    
+    def graph_rag_chat(self):  
+        """基于GraphRAG的对话实现"""  
+        from langchain.memory import ConversationBufferMemory  
+        from langchain.chains import ConversationalRetrievalChain  
+        
+        # 初始化组件  
+        memory = ConversationBufferMemory(  
+            memory_key="chat_history",  
+            return_messages=True,  
+            output_key="answer"  
+        )  
+        
+        # 创建混合检索器  
+        class GraphEnhancedRetriever:  
+            def __init__(self, vector_retriever, graph):  
+                self.vector_retriever = vector_retriever  
+                self.graph = graph  
+                
+            def get_relevant_documents(self, query: str) -> List[Dict]:  
+                # 向量检索  
+                vector_docs = self.vector_retriever.get_relevant_documents(query)  
+                
+                # 图谱检索  
+                graph_query = f"""  
+                MATCH path=(e1)-[r]->(e2)  
+                WHERE e1.name CONTAINS '{query}' OR e2.name CONTAINS '{query}'  
+                RETURN path LIMIT 5  
+                """  
+                graph_paths = self.graph.query(graph_query)  
+                
+                return {  
+                    "vector_docs": vector_docs,  
+                    "graph_paths": graph_paths  
+                }  
+
+        # 初始化检索器  
+        vector_retriever = Chroma(  
+            client=self.chroma_client,  
+            collection_name="my_collection"  
+        ).as_retriever()  
+        
+        hybrid_retriever = GraphEnhancedRetriever(vector_retriever, self.graph)  
+        
+        # 创建对话链  
+        qa_chain = ConversationalRetrievalChain.from_llm(  
+            llm=self.agent.llm,  
+            retriever=hybrid_retriever,  
+            memory=memory,  
+            combine_docs_chain_kwargs={  
+                "prompt": self._build_graph_prompt(),  
+                "document_prompt": PromptTemplate(  
+                    input_variables=["page_content"],  
+                    template="{page_content}"  
+                )  
+            },  
+            get_chat_history=lambda h: "\n".join([f"User:{u}\nAssistant:{a}" for u, a in h])  
+        )  
+        
+        # 启动对话循环  
+        print("========== GraphRAG对话系统启动 ==========")  
+        while True:  
+            try:  
+                query = input("用户: ")  
+                if query.lower() in ["exit", "quit"]:  
+                    break  
+                
+                result = qa_chain({"question": query})  
+                print(f"助手: {result['answer']}")  
+                print("\n知识图谱路径:")  
+                for path in result["graph_paths"]:  
+                    print(f"- {path['start_node']['name']} → {path['relationship']} → {path['end_node']['name']}")  
+                print("=====================================")  
+                
+            except KeyboardInterrupt:  
+                break  
+    
+    
+# 辅助函数（需在类外实现）  
+def visualize_knowledge_graph(graph: Neo4jGraph):  
+    """可视化知识图谱（示例）"""  
+    query = """  
+    MATCH (n)-[r]->(m)  
+    RETURN n.name AS source,   
+           type(r) AS relationship,   
+           m.name AS target  
+    LIMIT 50  
+    """  
+    return graph.query(query)  
         
         
         
