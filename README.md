@@ -28,8 +28,12 @@ huggingface-cli download --resume-download JasleenSingh91/travel-QA --local-dir 
 ```
 
 ## Download RAG dataset
+
 ```bash
+cd src/data
+
 huggingface-cli download --resume-download BruceNju/crosswoz-sft --local-dir crosswoz-sft
+
 ```
 
 ## Data Example Format
