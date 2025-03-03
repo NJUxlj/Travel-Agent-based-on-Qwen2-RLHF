@@ -30,6 +30,12 @@ class ToolDispatcher:
             #     api_key=CUSTOM_SEARCH_API_KEY,  
             #     search_engine_id=CUSTOM_SEARCH_ENGINE_ID  
             # ),
+            
+            "get_weather": WeatherExecutor,
+            "book_hotel": HotelExecutor,
+            "book_flight": PlaneTicketExecutor,
+            "find_fastest_route": TransportationExecutor,
+            
         }  
         
         self.prompt_template = MyPromptTemplate()

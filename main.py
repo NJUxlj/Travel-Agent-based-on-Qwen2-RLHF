@@ -67,13 +67,29 @@ def use_rag():
     agent = TravelAgent(SFT_MODEL_PATH)
     rag = RAG(agent = agent)
     
-    results = rag.query_db("train tickets")
-    print(results)
+    # results = rag.query_db("train tickets")
+    # print(results)
     
+    rag.rag_chat()
+    
+    
+    # I want to go to Florida, I am now in the New York. Please help me book a hotel in Floria. I will arrive at 12:36:42 and leave at 22:43:12, my budget is 5000 dollars.
 
 
 
+def use_rag_web_demo():
+    
+    from src.ui.rag_web_demo import initialize_rag, create_demo
+    rag_system = initialize_rag()  
+    demo = create_demo(rag_system)  
+    demo.launch(  
+        server_name="0.0.0.0",  
+        server_port=7860,  
+        share=False,  
+        favicon_path="./travel_icon.png"  
+    )  
 
 if __name__ == "__main__":
     # inference()
-    use_rag()
+    # use_rag()
+    use_rag_web_demo()

@@ -87,7 +87,8 @@ class RAG():
         history = [("You are a very help AI assistant who can help me plan a wonderful trip for a vacation",
                     "OK, I know you want to have a good travel plan and I will answer your questions about the traveling spot and search for the best plan about the traveling route and hotel.")]
 
-        print(" ============ Welcome to the TravelAgent Chat! Type 'exit' to stop chatting. ==========")  
+        print("\n\n\n=============================")
+        print("============ Welcome to the TravelAgent Chat! Type 'exit' to stop chatting. ==========")  
         while True:  
             user_input = input(f"User: ")  
             if user_input.lower() == 'exit':  
@@ -100,14 +101,23 @@ class RAG():
                 )
             
             # formatted_history = " ".join([f"User: {user}\nSystem: {sys}\n" for user, sys in history])
-            tool_call_str = self.agent.generate_response(prompt)  
+
             
+            tool_call_str = self.agent.generate_response(
+                prompt,
+                max_length=2048
+                )  
+            
+            print(" ================ 模型返回的包含工具调用的response =======================")
+            print(tool_call_str)
+            print("===========================================")
             
             # 工具调用
             raw_result = self.dispatcher.execute(tool_call_str)
             
             # 数据库匹配
             db_result = self.query_db(user_input) if self.use_db else ""
+            db_result = "\n".join(db_result)
             
             final_response = tool_call_str + f"""
             
@@ -117,13 +127,17 @@ class RAG():
             数据库查询的结果是：
             {db_result}
             """
+            print("=============== 集成所有的工具信息后的prompt ===============")
+            print(final_response)
+            print("=====================================================")
             
-            summary = self.summarize_results(final_response)
+            travel_plan = self.get_travel_plan(final_response, max_length=256)
+            # summary = self.summarize_results(final_response)
             # 总结
-            print(f"TravelAgent: {summary}")  
+            print(f"TravelAgent: {travel_plan}")  
             print(" ======================================= ")
             
-            history.append((user_input, summary))
+            history.append((user_input, travel_plan))
     
     
     
@@ -141,6 +155,15 @@ class RAG():
             summaries.append(f"标题：{item['title']}\n摘要：{item['snippet']}")  
         return "\n\n".join(summaries) 
     
+    
+    def get_travel_plan(self, query:str, max_length = 512):
+        SYS_PROMPT = "你是一个旅行助手，可以帮助我规划一条合适的旅游路线. 基于下面的信息: {query}, 请你帮我规划一条合理的路由路线. 你返回的路线比如用列表的形式组织，并且清晰，简洁."
+
+        
+        response = self.agent.generate_response(SYS_PROMPT, max_length=max_length)
+        
+        
+        return response
     
     
     

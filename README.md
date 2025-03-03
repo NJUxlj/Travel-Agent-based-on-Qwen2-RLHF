@@ -135,7 +135,7 @@ configs:
 
 
 
-## Travel Agent运行结果
+## 根据 Travel Agent 的路线规划生成思维导图（Mind Map）运行结果
 ![image](image/Snipaste_2024-12-30_20-16-28.png)
 
 
@@ -147,6 +147,10 @@ configs:
 ![image](https://github.com/user-attachments/assets/27aea7e5-620b-42dd-a68d-070c5c0be2cb)
 ![image](https://github.com/user-attachments/assets/577a138a-f3e7-48f0-bd97-e319ae7982c7)
 
+
+## RAG Web Demo 运行结果
+![rag_web_demo](image/rag_web_demo.png)
+![rag_web_demo2](image/rag_web_demo2.png)
 
 #### 运行结果解释
 我们给RAG的问题包含了：question+context， context是由数据集中前5个与question最接近的样本组成的。

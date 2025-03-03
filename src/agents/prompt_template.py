@@ -60,14 +60,20 @@ class MyPromptTemplate:
                 可用工具列表：  
                 {tools_desc}  
 
+                
                 当前对话历史：  
-                {history if history else "无"}  
+                {(history[:500] if len(history) > 500 else history) if history else "无"}  
 
                 用户问题：{query}  
-
+                
+                你只能在工具列表中选择一种工具进行相应，请务必遵守下面的工具调用格式。
+                
                 请按照以下格式响应：  
                 <思考>分析问题并选择工具</思考>  
-                <工具调用>{'{工具名称}'}(参数1=值1, 参数2=值2)</工具调用>"""
+                <工具调用>{'{工具名称}'}(参数1=值1, 参数2=值2)</工具调用>
+                
+            
+                """
                 
     def _build_hotel_template(self):  
         return ToolTemplate(  
