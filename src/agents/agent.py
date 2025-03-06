@@ -2,24 +2,37 @@
 from src.agents.prompt_template import MyPromptTemplate
 from src.agents.tools import ToolDispatcher
 from typing import Dict, List, Optional, Tuple
-from src.models.model import TravelAgent
+# from src.models.model import TravelAgent
 from src.data.data_processor import CrossWOZProcessor
 
 
 
-
-from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain  
+import langchain
+from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain
+from langchain.chains.conversational_retrieval.base import ChatVectorDBChain
+from langchain.chains.llm import LLMChain
+  
 from langchain.memory.buffer import ConversationBufferMemory  
-from langchain_community.vectorstores import Chroma      # pip install langchain-chroma  pip install langchain_community
+from langchain_community.vectorstores.chroma import Chroma      # pip install langchain-chroma  pip install langchain_community
 from langchain_core.prompts import ChatPromptTemplate  
 from langchain_core.runnables import RunnablePassthrough  
 from langchain_core.output_parsers import StrOutputParser  
-from langchain.embeddings import HuggingFaceEmbeddings  
+from langchain_community.embeddings.huggingface import HuggingFaceEmbeddings  
 from langchain_core.prompts import PromptTemplate
 
-from langchain.graphs import Neo4jGraph  
-from langchain.chains.graph_qa.cypher import GraphCypherQAChain
-# from langchain_experimental.graph_transformers import ChainMap     # pip install langchain_experimental
+from langchain_community.llms.tongyi import Tongyi
+from langchain_community.llms.openai import OpenAI
+from langchain_community.embeddings.openai import OpenAIEmbeddings
+
+from langchain_community.document_loaders.pdf import PyPDFLoader
+
+
+
+from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationMixin
+
+
+
+from typing import Dict, List, Optional, Tuple, Literal
 
 
 '''
@@ -53,7 +66,7 @@ class MyAgent():
     def __init__(
         self, 
         use_api:bool = True, 
-        travel_agent:TravelAgent=None,
+        travel_agent=None,
         use_rag = False,
         use_langchain_agent = False
         ):
@@ -71,8 +84,20 @@ class MyAgent():
     def call_local_model(self, prompt):
     
         # 加载本地模型
-        model = TravelAgent.from_pretrained(SFT_MODEL_PATH)
+        model:AutoModelForCausalLM|GenerationMixin = AutoModelForCausalLM.from_pretrained(SFT_MODEL_PATH)
         model = model.to("cuda")
+        
+        tokenizer = AutoTokenizer.from_pretrained(SFT_MODEL_PATH)
+        
+        tokenizer.pad_token = tokenizer.eos_token
+        model.config.pad_token_id = model.config.eos_token_id
+        
+        inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
+        outputs = model.generate(**inputs, max_new_tokens=512)
+        response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        return response
+        
+        
     
     #https://open.bigmodel.cn/ 注册获取APIKey
     #https://www.bigmodel.cn/dev/api/normal-model/glm-4  API 文档
@@ -138,6 +163,22 @@ class MyAgent():
         final_result = self.comprehensive_optimization_agent(travel_plan_response, structure, language_optimization_suggestions, content_enrichment_suggestions, readability_evaluation_result)
         
         return final_result
+    
+    
+    
+
+
+
+class AgentWithLangChain(): 
+    
+    
+    def __init__(
+        self,
+        chain_type:Literal["stuff", "map_reduce", "refine"] = "stuff",
+        ):
+        pass
+
+
 
 
         

@@ -47,6 +47,18 @@ class MyPromptTemplate:
     def register_tool(self, tool: ToolTemplate):  
         """注册新工具"""  
         self.tools[tool.name] = tool  
+        
+    def get_tools(self)->str:
+        return "\n".join(
+            [f"{tool.name}: {tool.description}\n参数: {[p.name for p in tool.parameters]}"
+             for tool in self.tools.values()]
+        )
+        
+    def get_tool_format(self):
+        return """
+        <思考>分析问题并选择工具</思考>  
+        <工具调用>{'{工具名称}'}(参数1=值1, 参数2=值2)</工具调用>
+        """
     
     def generate_prompt(self, query: str, history: Optional[List] = None) -> str:  
         """生成完整提示"""  

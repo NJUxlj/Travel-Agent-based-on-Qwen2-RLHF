@@ -317,18 +317,22 @@ class RAG():
         return ChatPromptTemplate.from_template("""  
             结合以下上下文和工具调用结果回答问题：  
             
-            上下文信息：  
+            上下文：  
             {context}  
             
             历史对话：  
             {chat_history}  
+            
+            可调用的工具：
+            {tools}
             
             用户问题：{question}  
             
             请按以下格式响应：  
             {tool_format}  
             """).partial(  
-                tool_format=self.prompt_template.generate_prompt("", "")  
+                tool_format=self.prompt_template.get_tool_format(),
+                tools = self.prompt_template.get_tools(),
             )  
             
     def _process_langchain_response(self, response: str) -> str:  
@@ -345,11 +349,9 @@ class RAG():
 
             # 执行工具调用  
             result = self.dispatcher.execute(tool_call.group(1).strip())  
+             
             
-            # 数据库查询不应该在这里
-            db_result = self.query_db(tool_call.group(1)) if self.use_db else ""  
-            
-            return f"{response}\n\n工具执行结果：{result}\n数据库匹配结果：{db_result}"  
+            return f"{response}\n\n工具执行结果：{result}"  
         
         except Exception as e:  
             return f"Error processing response: {str(e)}"  
