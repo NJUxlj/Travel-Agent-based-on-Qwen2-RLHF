@@ -1,20 +1,30 @@
-from src.models.model import TravelAgent  
-# from src.ui.app import launch_ui  
 
-from src.finetune.sft_trainer import SFTTrainer
+try:
+   from src.models.model import TravelAgent  
+   # from src.ui.app import launch_ui  
 
-from src.utils.utils import SFTArguments
+   from src.finetune.sft_trainer import SFTTrainer
 
-from src.configs.config import MODEL_PATH, DATA_PATH, SFT_MODEL_PATH
+   from src.utils.utils import SFTArguments
 
-from src.data.data_processor import TravelQAProcessor
+   from src.configs.config import MODEL_PATH, DATA_PATH, SFT_MODEL_PATH
 
-
-from src.agents.rag import RAG
-
+   from src.data.data_processor import TravelQAProcessor
 
 
-from src.agents.agent import MyAgent
+   from src.agents.rag import RAG
+
+   from src.agents.rag import CityRAG
+
+
+
+   from src.agents.agent import MyAgent
+   
+except Exception as e:
+   print("导包出现问题，应该是版本问题，但是先不管: ", str(e))
+   print("==================================")
+
+import argparse
 
 PLAN_EXAMPLE =  """
 
@@ -168,6 +178,14 @@ def use_rag():
     # I want to go to Florida, I am now in the New York. Please help me book a hotel in Floria. I will arrive at 12:36:42 and leave at 22:43:12, my budget is 5000 dollars.
 
 
+def use_city_rag():
+   try:
+      rag = CityRAG()
+      rag.query("帮我规划一个上海三日游的方案")
+      
+   except Exception as e:
+      print("rag 对象构建出现错误：", str(e))
+   
 
 def use_rag_web_demo():
     
@@ -191,9 +209,46 @@ def use_agent():
     
     print(result)
     
+    
+def parse_arguments(default_func = "use_agent"):
+      parser = argparse.ArgumentParser(description="Travel Agent: Choose the function you wang to display ~")
+      parser.add_argument(
+         "--function", 
+         type=str, 
+         default = default_func, 
+         help="Choose the function from [train, inference, use_rag, use_agent, use_rag_web_demo]"
+         )
 
+      # parser.add_argument(
+      #    "--model", type=str, default="gpt-4o", help="model used for decoding. Please select from [gpt-4o, gpt-4o-mini]"
+      # )
+      
+
+      
+      args = parser.parse_args()
+      
+      if args.function == "train":
+          train()
+
+      elif args.function == "inference":
+          inference()
+
+      elif args.function == "use_rag":
+          use_rag()
+
+      elif args.function == "use_agent":
+          use_agent()
+
+      elif args.function == "use_rag_web_demo":
+          use_rag_web_demo()
+          
+          
+    
 if __name__ == "__main__":
     # inference()
     # use_rag()
     # use_rag_web_demo()
-    use_agent()
+   #  use_agent()
+   # parse_arguments()
+   
+   use_city_rag()

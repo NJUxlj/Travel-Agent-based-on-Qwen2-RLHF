@@ -18,10 +18,18 @@ from src.utils.utils import (
     load_qwen
 )
 
-from src.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
+try:
+    from src.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
+except Exception as e:
+    print("modeling_qwen2 导包出现问题， 应该是transformers版本过低：",str(e))
+    
 
 # from src.finetune.sft_trainer import SFTTrainer
 # from src.finetune.dpo_trainer import DPOTrainer
+
+from zhipuai import ZhipuAI
+import os
+ZHIPU_API_KEY = os.environ.get("ZHIPU_API_KEY")
 
 
 class TravelAgent:
@@ -39,7 +47,8 @@ class TravelAgent:
         use_sft = False,
         use_dpo = False,
         use_ppo = False,
-        use_grpo = False
+        use_grpo = False,
+        use_api = False,
         ) -> tuple:
         """
         加载基础模型和分词器
@@ -61,41 +70,61 @@ class TravelAgent:
         self.use_dpo = use_dpo
         self.use_ppo = use_ppo
         self.use_grpo = use_grpo
-        
-        # 默认LoRA配置  
-        self.lora_config = {  
-            "r": 8,  # LoRA秩  
-            "lora_alpha": 32,  # LoRA alpha参数  
-            "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],  # 需要训练的模块  
-            "lora_dropout": 0.1,  
-            "bias": "none",  
-            "task_type": TaskType.CAUSAL_LM  
-        }  if lora_config is None else lora_config
-        
-        # 加载分词器
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            model_name,
-            trust_remote_code=True,
-            padding_side="right"
-        )
-        
-        # 确保分词器具有pad_token
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-        
-        self.model: Qwen2ForCausalLM = self._init_model().to(self.device)
+        self.use_api = use_api
         
         
         
+        if self.use_api:
+            pass
         
-        if self.use_sft:
-            self.sft_trainer = sft_trainer
+        else:
+        
+            # 默认LoRA配置  
+            self.lora_config = {  
+                "r": 8,  # LoRA秩  
+                "lora_alpha": 32,  # LoRA alpha参数  
+                "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],  # 需要训练的模块  
+                "lora_dropout": 0.1,  
+                "bias": "none",  
+                "task_type": TaskType.CAUSAL_LM  
+            }  if lora_config is None else lora_config
             
-        if self.use_dpo:
-            self.dpo_trainer = dpo_trainer
-        
-        
-        torch.cuda.empty_cache()  
+            # 加载分词器
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                model_name,
+                trust_remote_code=True,
+                padding_side="right"
+            )
+            
+            # 确保分词器具有pad_token
+            if self.tokenizer.pad_token is None:
+                self.tokenizer.pad_token = self.tokenizer.eos_token
+            
+            self.model: Qwen2ForCausalLM = self._init_model().to(self.device)
+            
+            
+            
+            
+            if self.use_sft:
+                self.sft_trainer = sft_trainer
+                
+            if self.use_dpo:
+                self.dpo_trainer = dpo_trainer
+            
+            
+            torch.cuda.empty_cache()  
+            
+            
+    def call_api_model(self, prompt):
+        client = ZhipuAI(api_key=ZHIPU_API_KEY) 
+        response = client.chat.completions.create(
+            model="glm-4-flash",  # 填写需要调用的模型名称
+            messages=[
+                {"role": "user", "content": prompt},
+            ],
+        )
+        response_text = response.choices[0].message.content
+        return response_text
         
         
     

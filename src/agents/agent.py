@@ -55,9 +55,11 @@ class MyAgent():
         use_api:bool = True, 
         travel_agent:TravelAgent=None,
         use_rag = False,
+        use_langchain_agent = False
         ):
         self.use_api = use_api
         self.use_rag = use_rag
+        self.use_langchain_agent = use_langchain_agent
 
         
         if not self.use_api:

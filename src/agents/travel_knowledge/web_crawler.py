@@ -2,6 +2,10 @@ import requests
 from bs4 import BeautifulSoup  
 import os  
 
+
+
+
+
 # 定义要爬取的城市列表  
 cities = ["北京", "上海", "广州", "成都"]  
 

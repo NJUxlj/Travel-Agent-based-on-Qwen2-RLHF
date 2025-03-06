@@ -1,26 +1,39 @@
 
-from src.agents.prompt_template import MyPromptTemplate
-from src.agents.tools import ToolDispatcher
-from typing import Dict, List, Optional, Tuple
-from src.models.model import TravelAgent
-from src.data.data_processor import CrossWOZProcessor
 
 
+try:
 
+    from src.agents.prompt_template import MyPromptTemplate
+    from src.agents.tools import ToolDispatcher
+    from typing import Dict, List, Optional, Tuple
+    from src.models.model import TravelAgent
+    from src.data.data_processor import CrossWOZProcessor
 
-from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain  
-from langchain.memory.buffer import ConversationBufferMemory  
-from langchain_community.vectorstores import Chroma      # pip install langchain-chroma  pip install langchain_community
-from langchain_core.prompts import ChatPromptTemplate  
-from langchain_core.runnables import RunnablePassthrough  
-from langchain_core.output_parsers import StrOutputParser  
-from langchain.embeddings import HuggingFaceEmbeddings  
-from langchain_core.prompts import PromptTemplate
+except Exception as e:
+    print("导包出现问题：",str(e))
+    print("================================")
+    
+    
 
-from langchain.graphs import Neo4jGraph  
-from langchain.chains.graph_qa.cypher import GraphCypherQAChain
-# from langchain_experimental.graph_transformers import ChainMap     # pip install langchain_experimental
+try:
 
+    from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain  
+    from langchain.memory.buffer import ConversationBufferMemory  
+    from langchain_community.vectorstores.chroma import Chroma      # pip install langchain-chroma  pip install langchain_community
+    from langchain_core.prompts import ChatPromptTemplate  
+    from langchain_core.runnables import RunnablePassthrough  
+    from langchain_core.output_parsers import StrOutputParser  
+    from langchain.embeddings import HuggingFaceEmbeddings  
+    from langchain_core.prompts import PromptTemplate
+
+    from langchain.graphs import Neo4jGraph  
+    from langchain.chains.graph_qa.cypher import GraphCypherQAChain
+    # from langchain_experimental.graph_transformers import ChainMap     # pip install langchain_experimental
+except Exception as e:
+    print("langchain 导包出现问题：", str(e))
+    print("=================================")
+    
+    
 
 '''
 建议检查Pydantic版本兼容性，推荐使用：
@@ -33,13 +46,19 @@ from datasets import load_dataset
 import chromadb
 from chromadb.utils.embedding_functions import EmbeddingFunction  
 import re
+import os
+import json
 import torch
+import numpy as np
+import jieba
 from zhipuai import ZhipuAI 
+
+from .bm25 import BM25
 
 from src.configs.config import RAG_DATA_PATH, SFT_MODEL_PATH, EMBEDDING_MODEL_PATH
 
 
-
+ZHIPU_API_KEY = os.environ.get("ZHIPU_API_KEY")
 
 
 class LocalEmbeddingFunction(EmbeddingFunction):  
@@ -58,6 +77,10 @@ class LocalEmbeddingFunction(EmbeddingFunction):
 
 
 
+
+
+
+
 class RAG():
     def __init__(
         self, 
@@ -66,12 +89,14 @@ class RAG():
         embedding_model_name_or_path:str = EMBEDDING_MODEL_PATH,
         use_langchain = False,
         use_prompt_template = True,
-        use_db = True
+        use_db = True,
+        use_api=False
         ):
         self.use_langchain = use_langchain
         self.use_prompt_template = use_prompt_template
         self.use_db = use_db
         self.agent = agent
+        self.use_api = use_api
         
         if use_db:
             self.embedding_fn = LocalEmbeddingFunction(model_name=embedding_model_name_or_path)
@@ -109,6 +134,17 @@ class RAG():
             
     #     return result
     
+    def call_api_model(self, prompt):
+        client = ZhipuAI(api_key=ZHIPU_API_KEY) 
+        response = client.chat.completions.create(
+            model="glm-4-flash",  # 填写需要调用的模型名称
+            messages=[
+                {"role": "user", "content": prompt},
+            ],
+        )
+        response_text = response.choices[0].message.content
+        return response_text
+    
     
     
     def _initialize_database(self):  
@@ -125,7 +161,6 @@ class RAG():
                 metadatas=metadatas,  
                 ids=ids  
             )  
-        
     
     
     def query_db(self, user_query:str, n_results=5)->List[str]:
@@ -338,7 +373,93 @@ class RAG():
         return response
     
     
+
+
+class CityRAG(RAG):
+    '''
+    基于 BM25 匹配算法和城市旅游知识库实现的RAG
+    '''
+    def __init__(
+        self, 
+        agent: TravelAgent = None,
+        dataset_name_or_path:str = RAG_DATA_PATH,
+        embedding_model_name_or_path:str = EMBEDDING_MODEL_PATH,
+        use_langchain = False,
+        use_prompt_template = True,
+        use_db = True,
+        use_api=True,
+        folder_path="src\\agents\\travel_knowledge\\tour_pages",
+    ):
+        
+        super().__init__(
+            agent=agent,
+            dataset_name_or_path = dataset_name_or_path,
+            embedding_model_name_or_path= embedding_model_name_or_path,
+            use_langchain = use_langchain,
+            use_prompt_template = use_prompt_template,
+            use_db = use_db,
+            use_api = use_api
+        )
+        
+        self.corpus:Dict[str, List] = self.load_city_data(folder_path)
+        
+        self.bm25_model = BM25(self.corpus)
+        
+        
+        
+        
+        
+    def load_city_data(self, folder_path)->Dict[str, List[str]]:
+        self.city_data = {}
+        
+        for file_name in os.listdir(folder_path):
+            if file_name.endswith(".txt"):
+                with open(os.path.join(folder_path, file_name), "r", encoding="utf-8") as file:
+                    plan = file.read()
+                    city = file_name.split(".")[0]
+                    self.city_data[city] = plan
+                    
+        corpus = {}
+        self.index_to_name = {}
+        index = 0
+        
+        for city, plan in self.city_data.items():
+            corpus[city] = jieba.lcut(plan)
+            self.index_to_name[index] = city
+            index+=1
+            
+        return corpus
     
+    
+    
+    
+    def retrive(self, user_query):
+        scores = self.bm25_model.get_scores(jieba.lcut(user_query))
+        
+        sorted_scores = sorted(scores, key=lambda x:x[1], reverse = True)
+        city_index = sorted_scores[0][0]
+        
+        text = self.city_data[self.index_to_name[city_index]]
+        
+        return text
+    
+    
+    
+    def query(self, user_query):
+        print("user_query:", user_query)
+        print("=======================")
+        retrive_text = self.retrive(user_query)
+        print("retrive_text:", retrive_text)
+        print("=======================")
+        prompt = f"请根据以下从数据库中获得的旅行路线规划，回答用户问题：\n\n所有城市的旅行笔记，景点、美食、酒店推荐：\n{retrive_text}\n\n用户问题：{user_query}"
+        response_text = self.call_api_model(prompt)
+        print("模型回答：", response_text)
+        print("=======================")
+        
+        
+        
+
+
     
 class GraphRAG(RAG):
     def __init__(
@@ -348,7 +469,8 @@ class GraphRAG(RAG):
         embedding_model_name_or_path:str = EMBEDDING_MODEL_PATH,
         use_langchain = False,
         use_prompt_template = True,
-        use_db = True
+        use_db = True,
+        use_api = False,
     ):
         super().__init__(
             agent=agent,
@@ -356,7 +478,8 @@ class GraphRAG(RAG):
             embedding_model_name_or_path= embedding_model_name_or_path,
             use_langchain = use_langchain,
             use_prompt_template = use_prompt_template,
-            use_db = use_db
+            use_db = use_db,
+            use_api=use_api
         )
     
     def _initialize_knowledge_graph(self) -> Neo4jGraph:  
@@ -495,6 +618,16 @@ class GraphRAG(RAG):
 
 
 
+
+
+
+class RagDispatcher:
+    def __init__(
+        self,
+        rag_type:str = "rag"
+    ):
+        pass
+    
 
 
 
