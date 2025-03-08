@@ -86,6 +86,20 @@ class MyPromptTemplate:
                 
             
                 """
+    def get_tool_format(self):
+        
+        return f"""
+                <思考>分析问题并选择工具</思考>  
+                <工具调用>{'{工具名称}'}(参数1=值1, 参数2=值2)</工具调用>
+                """
+
+
+    def get_tool_desc(self):
+        tools_desc = "\n".join(  
+            [f"{tool.name}: {tool.description}\n参数: {[p.name for p in tool.parameters]}"  
+             for tool in self.tools.values()]  
+        )  
+        return tools_desc
                 
     def _build_hotel_template(self):  
         return ToolTemplate(  
