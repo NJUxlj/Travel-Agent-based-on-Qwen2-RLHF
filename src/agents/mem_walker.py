@@ -21,7 +21,7 @@ from zhipuai import ZhipuAI
 import re
 
 
-from src.configs.config import MODEL_PATH,EMBEDDING_MODEL_PATH_BPE
+from src.configs.config import MODEL_PATH,EMBEDDING_MODEL_PATH_BPE, EMBEDDING_MODEL_PATH
 from src.agents.chat_pdf import ChatPDF
 
 
@@ -56,6 +56,15 @@ class MemoryTreeNode():
         self.level = level
         self.children = children or []
         self.parent = None
+        self.id = None
+        
+        
+    def print_node_info(self):
+        print(f"Node_id: {self.id} Node Level: {self.level}, Content[:25]: {self.content[:25]}...")
+        print(f"Children Count: {len(self.children)}")
+        if self.parent:
+            print(f"parent.level: {self.parent.level}")
+            print(f"Parent Content[:25]: {self.parent.content[:25]}...")
 
 class MemoryTreeBuilder(MemoryBase):
     def __init__(self, chunk_size=1000, max_children=5):
@@ -133,11 +142,24 @@ class MemoryTreeBuilder(MemoryBase):
         
         
         return await self._call_model(
-            prompt_template=parent_summary_prompt,
+            prompt=parent_summary_prompt,
             inputs={"summaries": combined},
             model_type=model_type
         )
         
+        
+        
+    def print_memory_tree(self, node: MemoryTreeNode = None, indent: str = ""):
+        """递归打印内存树结构"""
+        if node is None:
+            return
+            
+        # 打印当前节点内容
+        print(f"{indent}Level {node.level}: [前50字] {node.content[:50]}...")
+        
+        # 递归打印子节点
+        for child in node.children:
+            self.print_memory_tree(child, indent + "    ")
         
         
         
@@ -226,6 +248,10 @@ class Navigator(MemoryBase):
              
             if current_node.level == 0:  # Leaf node
                 response = await self._handle_leaf(current_node, query)
+                
+                print("Leaf Node")
+                current_node.print_node_info()
+                print("leaf-node-response: ", response)
                 # if "Answer:" in response:
                 #     return response.split("Answer:")[-1].strip()
                 # else:
@@ -251,7 +277,11 @@ class Navigator(MemoryBase):
                     self.error_count += 1  
                 
             else:  # Non-leaf node
-                resposne = await self._handle_triage(current_node, query) 
+                response = await self._handle_triage(current_node, query) 
+                
+                print("Non-Leaf Node")
+                current_node.print_node_info()
+                print("non-leaf-node-response: ", response)
             
                 try:
                     reasoning, action = self._parse_triage(response)
@@ -274,6 +304,7 @@ class Navigator(MemoryBase):
                 except (InvalidAction):  
                     # 回溯到父节点
                     current_node, sibling_nodes = self.path_stack.pop()  
+                    print(f"回溯：current_node = {current_node}")
                     current_node = self._find_unvisited_child(sibling_nodes)  
                 
                 except ParseError:
@@ -339,7 +370,6 @@ class Navigator(MemoryBase):
     def _parse_leaf(self, response:str):
         """  
         解析叶节点响应，返回(reasoning, action, answer)  
-        严格遵循论文中"-2必须包含答案"的规则  
         """  
         # 匹配格式化的响应块  
         match = re.search(  
@@ -369,6 +399,11 @@ class Navigator(MemoryBase):
     
     def _save_work_memory(self, node:MemoryTreeNode, action):
         self.working_memory.append(node.children[action].content[:200])
+        print("===================================")
+        print("Save a child node to the working memory, node info:")
+        node.children[action].print_node_info()
+        print("=====================================")
+        
     
     def _find_unvisited_child(self, nodes):  
         """论文3.2节：寻找未访问的子节点"""  
@@ -422,7 +457,7 @@ class ChatPDFForMemWalker(ChatPDF):
             documents=self.all_chunks,   
             # embedding=FastEmbedEmbeddings(model_name = "BAAI/bge-small-en-v1.5")   # 注意，这玩意儿不支持本地路径
             embedding=HuggingFaceEmbeddings(
-                model_name=EMBEDDING_MODEL_PATH_BPE,
+                model_name=EMBEDDING_MODEL_PATH,
                 model_kwargs={'device': 'cpu'},  # 或 'cpu'  
                 encode_kwargs={'normalize_embeddings': True}  
                 
@@ -458,9 +493,11 @@ async def main():
     #     text = f.read()
     
     pdf_reader = ChatPDFForMemWalker()
-    pdf_reader.ingest_all(pdf_folder_path="D:\\ai-code\\Travel-Agent-based-on-Qwen2-RLHF\\src\\agents\\travel_knowledge\\tour_pdfs")
+    pdf_reader.ingest_all(pdf_folder_path="src/agents/travel_knowledge/tour_pdfs")
     all_chunks  = pdf_reader.get_memwalker_chunks()
     root = await builder.build_tree(all_chunks, model_type="api")
+    
+    builder.print_memory_tree(root)
     
  
     navigator = Navigator(model_type="api")
