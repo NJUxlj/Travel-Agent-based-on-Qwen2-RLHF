@@ -1,14 +1,92 @@
+
+from typing import List, Optional, Dict, Literal, Tuple, Any
+from langchain_core.documents import Document  
+from langchain.text_splitter import CharacterTextSplitter 
+from langchain_text_splitters import RecursiveCharacterTextSplitter  
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_community.llms.huggingface_pipeline import HuggingFacePipeline
+from langchain.chains.llm import LLMChain
+
+
+
+from langchain_community.vectorstores.chroma import Chroma
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+from langchain_community.embeddings.huggingface import HuggingFaceEmbeddings  
+from langchain.schema.output_parser import StrOutputParser
+from langchain_community.document_loaders.pdf import PyPDFLoader
+from langchain.vectorstores.utils import filter_complex_metadata
+
+
+
+
+
 from langchain_core.runnables import RunnableLambda, RunnableParallel  
-from langchain_core.output_parsers import StrOutputParser  
-from typing import List, Dict, Optional  
+ 
 from zhipuai import ZhipuAI  
 import os  
 
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer  
 
+from src.configs.config import MODEL_PATH,EMBEDDING_MODEL_PATH_BPE
+from src.agents.chat_pdf import ChatPDF
+
+import asyncio
+
 os.environ["ZHIPU_API_KEY"] = "your_api_key"  
 
-class SelfRAG:  
+
+
+
+class SelfRAGBase:
+    
+    def __init__(self):
+        pass
+    async def _call_model(self, prompt: ChatPromptTemplate, inputs: Dict, model_type: Literal["api", "huggingface"]) -> str:
+        if model_type == "api":
+            client = ZhipuAI(api_key=os.getenv("ZHIPU_API_KEY"))
+            response = client.chat.completions.create(
+                model="glm-4",
+                messages=[{"role": "user", "content": prompt.format(**inputs)}]
+            )
+            return response.choices[0].message.content
+        elif model_type == "huggingface":
+            llm = HuggingFacePipeline.from_model_id(
+                model_id=MODEL_PATH,
+                task="text-generation",
+                max_new_tokens=1000,
+            )
+            chain = LLMChain(llm=llm, prompt=prompt)
+            return await chain.arun(inputs)
+        else:
+            raise ValueError("Invalid model_type, please choose either 'api' or 'huggingface'")
+        
+        
+    def _init_vector_store(self):  
+        """初始化本地PDF文档库"""  
+        if not self._vector_store:  
+            # 加载本地PDF文档  
+            loader = PyPDFLoader("knowledge_base.pdf")  
+            documents = loader.load()  
+            
+            # 文档分块  
+            text_splitter = RecursiveCharacterTextSplitter(  
+                chunk_size=500,  
+                chunk_overlap=50  
+            )  
+            splits = text_splitter.split_documents(documents)  
+            
+            # 创建向量存储  
+            embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-base-zh")  
+            self._vector_store = Chroma.from_documents(  
+                documents=splits,  
+                embedding=embeddings  
+            )  
+
+
+
+
+
+class SelfRAG(SelfRAGBase):  
     def __init__(self, model_type="api"):  
         self.client = ZhipuAI()  
         self.model_type = model_type  
@@ -17,27 +95,11 @@ class SelfRAG:
         
     def retrieve(self, query: str, k: int=5) -> List[str]:  
         """检索模块"""  
-        if self.model_type == "api":  
-            response = self.client.chat.completions.create(  
-                model="glm-4",  
-                messages=[{  
-                    "role": "user",  
-                    "content": f"基于以下问题检索相关段落：{query}"  
-                }]  
-            )  
-            return [response.choices[0].message.content]  
-        else:  
-            # HuggingFace实现  
-           
-            model = AutoModelForSeq2SeqLM.from_pretrained("Qwen/Qwen1.5-7B")  
-            tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen1.5-7B")  
-            inputs = tokenizer(query, return_tensors="pt")  
-            outputs = model.generate(**inputs)  
-            return [tokenizer.decode(outputs[0])]  
+        response = self._call_model()
 
     def generate(self, prompt: str, context: Optional[str]=None) -> str:  
         """生成模块"""  
-        full_prompt = f"上下文：{context}\n\n生成：{prompt}" if context else prompt  
+        full_prompt = f'''上下文：{context}\n\n生成：{prompt}''' if context else prompt  
         if self.model_type == "api":  
             response = self.client.chat.completions.create(  
                 model="glm-4",  
@@ -129,10 +191,14 @@ class SelfRAG:
             
         return max(candidates, key=lambda x: x["score"])["text"]  
 
-# 使用示例  
-rag = SelfRAG(model_type="api")  # 切换为"huggingface"使用本地模型  
-chain = rag.build_chain()  
 
-question = "量子计算如何突破传统加密？"  
-result = chain.invoke(question)  
-print(f"最终答案：{result}")  
+
+def main():
+
+    # 使用示例  
+    rag = SelfRAG(model_type="api")  # 切换为"huggingface"使用本地模型  
+    chain = rag.build_chain()  
+
+    question = "量子计算如何突破传统加密？"  
+    result = chain.invoke(question)  
+    print(f"最终答案：{result}")  

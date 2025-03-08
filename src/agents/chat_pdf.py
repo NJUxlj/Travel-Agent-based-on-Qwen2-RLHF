@@ -6,6 +6,7 @@ from langchain_community.document_loaders.pdf import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema.runnable import RunnablePassthrough
 from langchain.prompts import PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
 from langchain.vectorstores.utils import filter_complex_metadata
 
 
@@ -27,7 +28,11 @@ DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY")
 class ChatPDF:
 
     
-    def __init__(self, model_type:Literal["ollama","huggingface","tongyi","openai"]= "ollama"): 
+    def __init__(
+        self, 
+        prompt:ChatPromptTemplate = None,
+        model_type:Literal["ollama","huggingface","tongyi","openai"]= "ollama"
+        ): 
         
         if model_type == 'ollama':
             self.model = ChatOllama(model="mistral")
@@ -55,6 +60,8 @@ class ChatPDF:
         
         self.text_spliter = RecursiveCharacterTextSplitter(chunk_size = 200, chunk_overlap = 100)
         
+        
+        
         self.prompt = PromptTemplate.from_template(
                         """
             <s> [INST] You are an assistant for question-answering tasks. Use the following pieces of retrieved context 
@@ -64,14 +71,44 @@ class ChatPDF:
             Context: {context} 
             Answer: [/INST]
             """
-        )
+        ) if prompt is None else prompt
         
         self.vector_store = None
         self.retriever = None
         self.chain = None
         
+    def ingest_all(self, pdf_folder_path: str):
+        assert self.vector_store is None, "Please clear the vector store first."
         
+        all_chunks = []
+        for file_name in os.listdir(pdf_folder_path):
+            docs = PyPDFLoader(file_path=file_name).load()
+            chunks = self.text_spliter.split_documents(docs)
+            chunks = filter_complex_metadata(chunks)
+            all_chunks.extend(chunks)
+            
+        self.vector_store = Chroma.from_documents(documents=chunks, embedding=FastEmbedEmbeddings())
+        self.retriever = self.vector_store.as_retriever(
+            search_type = "similarity_score_threshold",
+            search_kwargs = {
+                "k": 5,
+                "score_threshold": 0.5
+            }
+        )
+        
+        self.chain = ({"context":self.retriever, "question":RunnablePassthrough()}  # RunnablePassThrough 的本质， 是对用户输入的query做了恒等映射
+                      | self.prompt
+                      | self.model
+                      | StrOutputParser()
+                      )
+        
+        
+    
+    
     def ingest(self, pdf_file_path: str):
+        
+        assert self.vector_store is None, "Please clear the vector store first."
+        
         docs = PyPDFLoader(file_path=pdf_file_path).load()
         chunks = self.text_spliter.split_documents(docs)
         
