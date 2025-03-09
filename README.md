@@ -153,7 +153,7 @@ configs:
 
 
 ## SFT Running Snapshot
-![SFT](image/sft_train_snapshot.png)
+![SFT](image/SFT_train_snapshot.png)
 
 
 
