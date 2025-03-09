@@ -25,9 +25,9 @@ from langchain_core.runnables import RunnableLambda, RunnableParallel
 from zhipuai import ZhipuAI  
 import os  
 
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer  
+from transformers import AutoModelForSeq2SeqLM, AutoModelForCausalLM, AutoTokenizer, pipeline
 
-from src.configs.config import MODEL_PATH,EMBEDDING_MODEL_PATH_BPE
+from src.configs.config import MODEL_PATH,EMBEDDING_MODEL_PATH_BPE, SFT_MODEL_PATH
 from src.agents.chat_pdf import ChatPDF
 
 import asyncio
@@ -50,12 +50,16 @@ class SelfRAGBase:
             )
             return response.choices[0].message.content
         elif model_type == "huggingface":
-            llm = HuggingFacePipeline.from_model_id(
-                model_id=MODEL_PATH,
+            tokenizer = AutoTokenizer.from_pretrained(SFT_MODEL_PATH, trust_remote_code = True)
+            model = AutoModelForSeq2SeqLM
+            pipe = pipeline(
                 task="text-generation",
-                max_new_tokens=1000,
+                model = model,
+                tokenizer=tokenizer,
+                max_new_tokens = 200,
             )
-            chain = LLMChain(llm=llm, prompt=prompt)
+            model = HuggingFacePipeline(pipeline=pipe)
+            chain = LLMChain(llm=model, prompt=prompt)
             return await chain.arun(inputs)
         else:
             raise ValueError("Invalid model_type, please choose either 'api' or 'huggingface'")

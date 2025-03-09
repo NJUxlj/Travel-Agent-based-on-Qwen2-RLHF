@@ -16,12 +16,12 @@ from langchain_community.document_loaders.pdf import PyPDFLoader
 from langchain.vectorstores.utils import filter_complex_metadata
 
 
-
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 from zhipuai import ZhipuAI
 import re
 
 
-from src.configs.config import MODEL_PATH,EMBEDDING_MODEL_PATH_BPE, EMBEDDING_MODEL_PATH
+from src.configs.config import MODEL_PATH,EMBEDDING_MODEL_PATH_BPE, EMBEDDING_MODEL_PATH, SFT_MODEL_PATH
 from src.agents.chat_pdf import ChatPDF
 
 
@@ -38,12 +38,17 @@ class MemoryBase:
             )
             return response.choices[0].message.content
         elif model_type == "huggingface":
-            llm = HuggingFacePipeline.from_model_id(
-                model_id=MODEL_PATH,
-                task="text-generation",
-                max_new_tokens=1000,
+            tokenizer = AutoTokenizer.from_pretrained(SFT_MODEL_PATH)
+            hf_model = AutoModelForCausalLM.from_pretrained(SFT_MODEL_PATH, trust_remote_code=True, device_map="auto")
+            pipe = pipeline(
+                "text-generation",
+                model=hf_model,
+                tokenizer=tokenizer,
+                max_new_tokens=200,
             )
-            chain = LLMChain(llm=llm, prompt=prompt)
+            
+            model = HuggingFacePipeline(pipeline=pipe)
+            chain = LLMChain(llm=model, prompt=prompt)
             return await chain.arun(inputs)
         else:
             raise ValueError("Invalid model_type, please choose either 'api' or 'huggingface'")
@@ -51,12 +56,12 @@ class MemoryBase:
 
 
 class MemoryTreeNode():
-    def __init__(self, content: str, level: int, children: List['MemoryTreeNode'] = None):
+    def __init__(self, content: str, level: int, children: List['MemoryTreeNode'] = None, id=None):
         self.content = content
         self.level = level
         self.children = children or []
         self.parent = None
-        self.id = None
+        self.id = id
         
         
     def print_node_info(self):
@@ -72,6 +77,11 @@ class MemoryTreeBuilder(MemoryBase):
         self.max_children = max_children
         
     async def build_tree(self, chunks: List[Document], model_type: str) -> MemoryTreeNode:
+        '''
+        
+        
+        return Root Node
+        '''
 
         # chunks = self._chunk_text(text)
         
@@ -86,7 +96,7 @@ class MemoryTreeBuilder(MemoryBase):
             for i in range(0, len(current_level), self.max_children):
                 children = current_level[i:i+self.max_children]
                 parent_content = await self._summarize_nodes(children, model_type)
-                parent_node = MemoryTreeNode(parent_content, level, children)
+                parent_node = MemoryTreeNode(parent_content, level, children, id=f"level:{level} #num:{i}")
                 for child in children:
                     child.parent = parent_node
                 parent_nodes.append(parent_node)
@@ -100,7 +110,7 @@ class MemoryTreeBuilder(MemoryBase):
 
     async def _create_leaf_nodes(self, chunks: List[Document], model_type: Literal["api", "huggingface"]) -> List[MemoryTreeNode]:
         nodes = []
-        for chunk in chunks:
+        for idx, chunk in enumerate(chunks):
             
             # 封装一个大的 PromptTemplate
             leaf_summary_prompt = """  
@@ -121,7 +131,7 @@ class MemoryTreeBuilder(MemoryBase):
                 inputs={"text": chunk},
                 model_type=model_type
             )
-            nodes.append(MemoryTreeNode(summary, level=0))
+            nodes.append(MemoryTreeNode(summary, level=0, id = f"level:0 #num:{idx}"))
         return nodes
 
     async def _summarize_nodes(self, nodes: List[MemoryTreeNode], model_type: str) -> str:
@@ -501,7 +511,7 @@ async def main():
     
  
     navigator = Navigator(model_type="api")
-    answer = await navigator.navigate(root, "如果我只有3天假期，我应该在上海怎么玩比较好？")
+    answer = await navigator.navigate(root, "如果我只有3天假期，我应该在广州怎么玩比较好？")
     print("Final Answer:", answer)
     
     

@@ -23,11 +23,13 @@ try:
     from langchain_core.prompts import ChatPromptTemplate  
     from langchain_core.runnables import RunnablePassthrough  
     from langchain_core.output_parsers import StrOutputParser  
-    from langchain.embeddings import HuggingFaceEmbeddings  
+    from langchain_community.embeddings.huggingface import HuggingFaceEmbeddings  
     from langchain_core.prompts import PromptTemplate
 
     from langchain.graphs import Neo4jGraph  
     from langchain.chains.graph_qa.cypher import GraphCypherQAChain
+    
+    from datasets import Dataset
     # from langchain_experimental.graph_transformers import ChainMap     # pip install langchain_experimental
 except Exception as e:
     print("langchain 导包出现问题：", str(e))
@@ -55,7 +57,7 @@ from zhipuai import ZhipuAI
 
 from .bm25 import BM25
 
-from src.configs.config import RAG_DATA_PATH, SFT_MODEL_PATH, EMBEDDING_MODEL_PATH
+from src.configs.config import RAG_DATA_PATH, SFT_MODEL_PATH, EMBEDDING_MODEL_PATH, PAGE_FOLDER_PATH
 
 
 ZHIPU_API_KEY = os.environ.get("ZHIPU_API_KEY")
@@ -66,7 +68,7 @@ class LocalEmbeddingFunction(EmbeddingFunction):
     def __init__(self, model_name: str = EMBEDDING_MODEL_PATH):  
         self.embedder = HuggingFaceEmbeddings(  
             model_name=model_name,  
-            model_kwargs={'device': 'cuda' if torch.cuda.is_available() else 'cpu'},  
+            model_kwargs={'device': 'cpu'},  
             encode_kwargs={'normalize_embeddings': True}  
         )  
 
@@ -101,6 +103,7 @@ class RAG():
         if use_db:
             self.embedding_fn = LocalEmbeddingFunction(model_name=embedding_model_name_or_path)
             self.chroma_client = chromadb.Client()
+            print("Chroma数据集构造完毕")
             # self.chroma_client = chromadb.PersistentClient(path = "local dir")
             
             self.collection = self.chroma_client.create_collection(
@@ -110,14 +113,14 @@ class RAG():
                     "hnsw:space":"cosine",
                     "embedding_model": embedding_model_name_or_path
                 })
+            print("Chroma数据表构造完毕")
             self.dataset =  load_dataset(dataset_name_or_path, split="train").select(range(1000))
-            
-            self.embeddings = HuggingFaceEmbeddings(   # langchain 专用
-                model_name=EMBEDDING_MODEL_PATH
-            )  
-            
+            print("Crosswoz数据集加载完毕~~~")
+            self.embeddings = LocalEmbeddingFunction(EMBEDDING_MODEL_PATH).embedder
+            print("embedding模型加载完毕~~~~")
             # 加载数据集时自动生成嵌入  
             self._initialize_database() 
+            print("crosswoz数据集成功被转为嵌入向量。")
         
         
         if self.use_prompt_template:
@@ -147,12 +150,71 @@ class RAG():
     
     
     
-    def _initialize_database(self):  
+    
+    def _initialize_database(self, field = "history"):  
         """使用本地嵌入模型初始化数据库"""  
+        # 转换字符串字段为实际数据结构  
+        def convert_fields(example):  
+            # 转换所有JSON字符串字段  
+            for field in ['history']:  
+                if isinstance(example[field], str):  
+                    try:  
+                        example[field] = json.loads(example[field].replace("'", '"'))  
+                    except:  
+                        example[field] = []  # 处理空值情况  
+            
+            # for k, v in example.items():
+            #     if isinstance(v, str):  
+            #         try:  
+            #             example[k] = json.loads(v.replace("'", '"'))  
+            #         except:  
+            #             example[k] = []  # 处理空值情况  
+            return example 
+        
+        self.dataset = self.dataset.map(convert_fields)  
+        print("huggingface dataset, 每个样本的每个字段都可能是json字符串，因此我们要进行转换， 目前，转换成功")
+        print("type(self.dataset[0][field]) = ", type(self.dataset[0][field]) )
+        print("self.dataset[0][field] = ", self.dataset[0][field] )
+        
+        print("============ 开始用本地嵌入模型初始化数据库 ===============")
+        print("dataset = ", self.dataset)   
+        print("type(dataset) = ", type(self.dataset))
+        
+        print("dataset[0] = ", self.dataset[0])
+        
+        if not (isinstance(self.dataset, Dataset)) or field not in self.dataset[0]:  
+            print("dataset.features = ", self.dataset.features)
+            raise ValueError(f"数据集格式不符合要求，应包含'{field}'字段的字典") 
+        
+        
+        # 添加类型检查  
+        sample = self.dataset[0]  
+        # if not isinstance(sample[field], (dict, list)):  
+        #     raise TypeError(f"{field}字段应为字典/列表类型，实际类型为 {type(sample[field])}")   
+                
+        
+        
+        
+        sample = self.dataset[5][field]
+        print("==========================================")
+        print(f"the fifth {field} field sample = ", sample)
+        print("===============================================")
+        
+    
         batch_size = 100  
         for i in range(0, len(self.dataset), batch_size):  
-            batch = self.dataset[i:i+batch_size]  
-            documents = [item["history"] for item in batch]  
+            batch:List[str] = self.dataset[i:i+batch_size] if i+batch_size<=len(self.dataset) else self.dataset[i:len(self.dataset)]
+            # print("batch = ", batch)
+            print("type(batch) = ", type(batch))
+            
+            count = 0
+            for item in batch[field]:
+                print("item = ", item)
+                count+=1
+                if count==2:
+                    break
+                # raise ValueError("item stop")
+            documents = [str(item) for item in batch]  
             metadatas = [{"source": "crosswoz"}] * len(documents)  
             ids = [str(idx) for idx in range(i, i+len(documents))]  
             
@@ -390,7 +452,7 @@ class CityRAG(RAG):
         use_prompt_template = True,
         use_db = True,
         use_api=True,
-        folder_path="src\\agents\\travel_knowledge\\tour_pages",
+        folder_path=PAGE_FOLDER_PATH,
     ):
         
         super().__init__(
@@ -402,8 +464,10 @@ class CityRAG(RAG):
             use_db = use_db,
             use_api = use_api
         )
-        
+        print("基础RAG对象构造完毕~~~")
         self.corpus:Dict[str, List] = self.load_city_data(folder_path)
+        
+        print("城市旅游数据加载完毕~~~")
         
         self.bm25_model = BM25(self.corpus)
         
@@ -426,7 +490,7 @@ class CityRAG(RAG):
         index = 0
         
         for city, plan in self.city_data.items():
-            corpus[city] = jieba.lcut(plan)
+            corpus[index] = jieba.lcut(plan)
             self.index_to_name[index] = city
             index+=1
             

@@ -45,7 +45,8 @@ RAG_DATA_PATH = "src/data/crosswoz-sft"
 
 DEEPSPEED_CONFIG_PATH = "src/configs/ds_config.json"
 
-
+PDF_FOLDER_PATH = "src/agents/travel_knowledge/tour_pdfs"
+PAGE_FOLDER_PATH = "src/agents/travel_knowledge/tour_pages"
 
 # # 在代码中使用配置  
 # model = TravelAgent(  

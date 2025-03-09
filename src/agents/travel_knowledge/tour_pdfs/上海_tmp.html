@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>上海.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<h3 id="%E4%B8%8A%E6%B5%B7%E4%B8%89%E6%97%A5%E6%B7%B1%E5%BA%A6%E6%B8%B8%E6%94%BB%E7%95%A52025%E6%9C%80%E6%96%B0%E7%89%88">上海三日深度游攻略（2025最新版）</h3>
+<h4 id="%E4%BD%8F%E5%AE%BF%E6%8E%A8%E8%8D%90%E5%9C%B0%E9%93%81%E6%B2%BF%E7%BA%BF">住宿推荐（地铁沿线）</h4>
+<ol>
+<li>
+<p><strong>外滩茂悦大酒店</strong>（五星级）</p>
+<ul>
+<li>优势：陆家嘴景观房直面东方明珠，步行5分钟至外滩</li>
+<li>价格：¥1800+/晚（含双早）</li>
+</ul>
+</li>
+<li>
+<p><strong>锦江都城经典南京东路酒店</strong>（四星）</p>
+<ul>
+<li>位置：南京东路地铁站3号口50米</li>
+<li>特色：石库门建筑改造，含老上海早餐套餐</li>
+<li>价格：¥800-1200/晚</li>
+</ul>
+</li>
+</ol>
+<hr>
+<h3 id="day-1%E7%BB%8F%E5%85%B8%E5%9C%B0%E6%A0%87%E5%B7%A1%E7%A4%BC">Day 1：经典地标巡礼</h3>
+<p><strong>上午行程</strong></p>
+<ul>
+<li>08:30 酒店早餐（推荐尝鲜：粢饭糕+咸豆浆）</li>
+<li>09:30 南京东路步行街（地铁2号线南京东路站）
+<ul>
+<li>必看：永安百货钟楼（整点报时表演）</li>
+<li>隐藏玩法：第一百货顶楼「城市记忆」免费展览</li>
+</ul>
+</li>
+</ul>
+<p><strong>中午美食</strong></p>
+<ul>
+<li>11:30 老正兴菜馆（福州路店）
+<ul>
+<li>必点：草头圈子（大肠）、蟹粉豆腐</li>
+<li>人均：¥150（建议11点前到店避免排队）</li>
+</ul>
+</li>
+</ul>
+<p><strong>下午探索</strong></p>
+<ul>
+<li>13:30 豫园+城隍庙
+<ul>
+<li>豫园门票：¥40（需公众号预约）</li>
+<li>拍照点：九曲桥湖心亭（建议14点后光线最佳）</li>
+<li>避坑指南：景区内小商品谨慎购买</li>
+</ul>
+</li>
+</ul>
+<p><strong>傍晚交通</strong></p>
+<ul>
+<li>16:00 轮渡跨江体验（金陵东路渡口→东昌路渡口）
+<ul>
+<li>票价：¥2（刷交通卡）</li>
+<li>最佳时段：17:00-17:30（日落航班）</li>
+</ul>
+</li>
+</ul>
+<p><strong>夜景安排</strong></p>
+<ul>
+<li>18:30 陆家嘴环形天桥
+<ul>
+<li>三件套合影点：金茂君悦酒店正门地面</li>
+<li>亮灯时间：冬季18:00/夏季19:00</li>
+</ul>
+</li>
+</ul>
+<hr>
+<h3 id="day-2%E6%B5%B7%E6%B4%BE%E6%96%87%E5%8C%96%E4%BD%93%E9%AA%8C">Day 2：海派文化体验</h3>
+<p><strong>上午艺术之旅</strong></p>
+<ul>
+<li>09:00 西岸美术馆（地铁11号线云锦路站）
+<ul>
+<li>当前特展：蓬皮杜现代艺术藏品展（¥120）</li>
+<li>建筑亮点：滨江观景平台免费开放</li>
+</ul>
+</li>
+</ul>
+<p><strong>特色午餐</strong></p>
+<ul>
+<li>12:00 永康路「海派brunch」
+<ul>
+<li>推荐：O'mills Bakery（慢炖牛肉温泉蛋法棍）</li>
+<li>人均：¥90（周末需等位40分钟+）</li>
+</ul>
+</li>
+</ul>
+<p><strong>下午深度游</strong></p>
+<ul>
+<li>14:00 武康大楼片区
+<ul>
+<li>打卡路线：武康庭→罗密欧阳台→巴金故居</li>
+<li>新玩法：城市骑行（美团单车30分钟免费）</li>
+</ul>
+</li>
+</ul>
+<p><strong>晚餐推荐</strong></p>
+<ul>
+<li>18:00 进贤路本帮菜一条街
+<ul>
+<li>兰心餐厅：红烧肉+油爆虾（¥80/人）</li>
+<li>温馨提示：店面较小需拼桌</li>
+</ul>
+</li>
+</ul>
+<hr>
+<h3 id="day-3%E7%8E%B0%E4%BB%A3%E9%83%BD%E5%B8%82%E6%8E%A2%E7%B4%A2">Day 3：现代都市探索</h3>
+<p><strong>晨间活动</strong></p>
+<ul>
+<li>07:30 徐汇滨江晨跑（全程塑胶跑道）
+<ul>
+<li>补给点：星巴克滨江店（宠物友好门店）</li>
+</ul>
+</li>
+</ul>
+<p><strong>科技体验</strong></p>
+<ul>
+<li>10:00 上海天文馆（需提前7天18点抢票）
+<ul>
+<li>必看展项：VR月球漫步（每日限量预约）</li>
+<li>交通：地铁16号线滴水湖站+打车5分钟</li>
+</ul>
+</li>
+</ul>
+<p><strong>终极购物</strong></p>
+<ul>
+<li>15:00 前滩太古里
+<ul>
+<li>特色店铺：茑屋书店（限量艺术书籍）</li>
+<li>退税服务：B1层海关验货点（单笔满¥500可退）</li>
+</ul>
+</li>
+</ul>
+<hr>
+<h3 id="%E4%BA%A4%E9%80%9A%E8%B4%B4%E5%A3%AB">交通贴士</h3>
+<ol>
+<li>地铁三日票：¥45（磁浮机场线不可用）</li>
+<li>打车建议：晚高峰（17-19点）建议选曹操出行新能源车型（接单更快）</li>
+<li>机场快线：浦东机场→静安寺（夜宵线运营至凌晨1点）</li>
+</ol>
+<h3 id="%E6%B3%A8%E6%84%8F%E4%BA%8B%E9%A1%B9">注意事项</h3>
+<ul>
+<li>豫园每周一闭馆清洁（节假日除外）</li>
+<li>外滩建筑群灯光秀每晚20:00-22:00整点播放</li>
+<li>7-8月梅雨季建议携带折叠晴雨伞</li>
+</ul>
+
+</body>
+</html>

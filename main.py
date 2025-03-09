@@ -20,6 +20,9 @@ try:
 
    from src.agents.agent import MyAgent
    
+   from src.agents.rag_dispatcher import RAGDispatcher
+   
+   
 except Exception as e:
    print("导包出现问题，应该是版本问题，但是先不管: ", str(e))
    print("==================================")
@@ -115,6 +118,15 @@ PLAN_EXAMPLE =  """
 
 """
 
+
+'''
+
+打开控制台运行
+python main.py --function rag_dispatcher
+
+
+'''
+
 def train():
 
     # 初始化模型  
@@ -179,13 +191,22 @@ def use_rag():
 
 
 def use_city_rag():
-   try:
-      rag = CityRAG()
-      rag.query("帮我规划一个上海三日游的方案")
-      
-   except Exception as e:
-      print("rag 对象构建出现错误：", str(e))
    
+   rag = CityRAG()
+   rag.query("帮我想一个上海出行的方案")
+      
+   # except Exception as e:
+   #    print("rag 对象构建出现错误：", str(e))
+      
+      
+      
+def use_rag_dispatcher():
+    rag_dispatcher = RAGDispatcher()
+   
+   
+    answer = rag_dispatcher.dispatch("帮我规划一个广州三日游的方案")
+    
+    print("final answer  = ", answer)
 
 def use_rag_web_demo():
     
@@ -216,7 +237,7 @@ def parse_arguments(default_func = "use_agent"):
          "--function", 
          type=str, 
          default = default_func, 
-         help="Choose the function from [train, inference, use_rag, use_agent, use_rag_web_demo]"
+         help="Choose the function from [train, inference, use_rag, use_agent, use_rag_web_demo, rag_dispatcher]"
          )
 
       # parser.add_argument(
@@ -238,7 +259,8 @@ def parse_arguments(default_func = "use_agent"):
 
       elif args.function == "use_agent":
           use_agent()
-
+      elif args.function == "rag_dispatcher":
+          use_rag_dispatcher()
       elif args.function == "use_rag_web_demo":
           use_rag_web_demo()
           

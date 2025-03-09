@@ -62,7 +62,7 @@ class BM25:
         
         for word in self.docContainedWord.keys():
             doc_nums_contained_word = len(self.docContainedWord[word])
-            idf = math.log(self.corpus_size-doc_nums_contained_word) - \
+            idf = math.log(self.corpus_size-doc_nums_contained_word + 0.5) - \
                 math.log(doc_nums_contained_word + 0.5)
             
             self.idf[word] = idf        
@@ -77,6 +77,15 @@ class BM25:
         
         for word in negative_idfs:
             self.idf[word] = eps
+            
+        
+        print("==============================")
+        print("self.doc_freqs",[f"doc_id:{k}, " for k, v in self.doc_freqs.items()])
+        print("self.idf", self.idf)
+        print("self.doc_len", self.doc_len)
+        print("self.docContainedWord", self.docContainedWord)
+        print("self.corpus_size", self.corpus_size)
+        print("========================================")
 
     
     @property
@@ -102,7 +111,9 @@ class BM25:
         doc_freqs = self.doc_freqs[doc_index]
         
         for word in query:
-            score += self.idf[word] * (doc_freqs[word] * (k1+1) / (doc_freqs[word] + k1*(1-b+b*self.doc_len(doc_index)/avgdl)))
+            if word not in doc_freqs:
+                continue
+            score += self.idf[word] * (doc_freqs[word] * (k1+1) / (doc_freqs[word] + k1*(1-b+b*self.doc_len[doc_index]/avgdl)))
         
         return [doc_index, score]
         
