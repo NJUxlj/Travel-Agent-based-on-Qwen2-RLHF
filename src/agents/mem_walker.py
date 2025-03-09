@@ -383,7 +383,7 @@ class Navigator(MemoryBase):
         """  
         # 匹配格式化的响应块  
         match = re.search(  
-            r"\s*Reasoning:\s*(?P<reasoning>.+?)\s*Action:\s*(?P<action>-1|-2)\s*(Answer:\s*(?P<answer>.+?))?\s*",  
+            r"\s*Reasoning:\s*(?P<reasoning>.+?)\s*Action:\s*(?P<action>-1|-2)\s*(Answer:\s*(?P<answer>.*))",  
             response,  
             re.DOTALL  
         )  

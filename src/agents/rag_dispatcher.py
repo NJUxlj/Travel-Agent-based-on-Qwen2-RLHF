@@ -20,13 +20,13 @@ class RAGDispatcher():
     def __init__(self, rag_type:Literal["rag","self_rag", "corrective_rag", "mem_walker"]="mem_walker"):
         self.rag_type = rag_type
 
-    def dispatch(self, query:str):
+    async def dispatch(self, query:str):
         # 1. 规划路径分析
         # 2. 规划路径执行
         # 3. 规划路径总结
         
         if self.rag_type == "mem_walker":
-            return self.mem_walker(query)
+            return await self.mem_walker(query)
         
         elif self.rag_type == "rag":
             return self.rag(query)
@@ -46,7 +46,7 @@ class RAGDispatcher():
         pdf_reader.ingest_all(pdf_folder_path=PDF_FOLDER_PATH)
         
         all_chunks = pdf_reader.get_memwalker_chunks()
-        root = await builder.build_tree(all_chunks)
+        root = await builder.build_tree(all_chunks, model_type="api")
         
         builder.print_memory_tree(root)
     

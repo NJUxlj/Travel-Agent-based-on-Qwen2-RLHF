@@ -28,6 +28,7 @@ except Exception as e:
    print("==================================")
 
 import argparse
+import asyncio
 
 PLAN_EXAMPLE =  """
 
@@ -200,11 +201,11 @@ def use_city_rag():
       
       
       
-def use_rag_dispatcher():
+async def use_rag_dispatcher():
     rag_dispatcher = RAGDispatcher()
    
    
-    answer = rag_dispatcher.dispatch("帮我规划一个广州三日游的方案")
+    answer = await rag_dispatcher.dispatch("帮我规划一个广州三日游的方案")
     
     print("final answer  = ", answer)
 
@@ -231,7 +232,7 @@ def use_agent():
     print(result)
     
     
-def parse_arguments(default_func = "use_agent"):
+async def parse_arguments(default_func = "use_agent"):
       parser = argparse.ArgumentParser(description="Travel Agent: Choose the function you wang to display ~")
       parser.add_argument(
          "--function", 
@@ -260,7 +261,7 @@ def parse_arguments(default_func = "use_agent"):
       elif args.function == "use_agent":
           use_agent()
       elif args.function == "rag_dispatcher":
-          use_rag_dispatcher()
+          await use_rag_dispatcher()
       elif args.function == "use_rag_web_demo":
           use_rag_web_demo()
           
@@ -271,6 +272,6 @@ if __name__ == "__main__":
     # use_rag()
     # use_rag_web_demo()
    #  use_agent()
-   # parse_arguments()
+   asyncio.run(parse_arguments())
    
-   use_city_rag()
+   # use_city_rag()

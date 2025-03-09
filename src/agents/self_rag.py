@@ -92,7 +92,6 @@ class SelfRAGBase:
 
 class SelfRAG(SelfRAGBase):  
     def __init__(self, model_type="api"):  
-        self.client = ZhipuAI()  
         self.model_type = model_type  
         self.retrieve_threshold = 0.2  
         self.beam_width = 2  

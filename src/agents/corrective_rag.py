@@ -6,6 +6,11 @@ from zhipuai import ZhipuAI
 import os  
 import requests  
 
+
+'''
+CorrectiveRAG 还没写完，跑不起来。
+'''
+
 class CorrectiveRAG:  
     def __init__(self,   
                  corpus: List[str] = None,

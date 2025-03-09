@@ -49,6 +49,7 @@ huggingface-cli download --resume-download BruceNju/crosswoz-sft --local-dir cro
 
 
 - `crosswoz`
+- crosswoz用在哪里：在RAG系统统中，我们会用query去匹配crosswoz中的history这个字段下的数据，作为对已有的context和tool-use response 的补充。
 ```Plain Text
 {
             "dialog_id": "391",
@@ -68,12 +69,10 @@ huggingface-cli download --resume-download BruceNju/crosswoz-sft --local-dir cro
 ## 如何运行
 
 ```shell
-python main.py
+python main.py --function use_rag
 ```
 
-```shell
-python rag_naive.py
-```
+
 
 
 ## Experiment Setup
@@ -91,14 +90,46 @@ src:
      - processed_data
      - data_augmentation.py
      - data_preprocessor.py
+     - crosswoz-sft:
+        - ...
+    - travel_qa:
+        - ...
      - init.py
-    training:
+    configs:
+     - config.py
+     - ds_config.py
+    agents:
+     - travel_knowledge:
+        - tour_pages
+        - tour_pdfs
+     - agent.py
+     - bm25.py
+     - tools.py # 各种 Executors: google,weather, transportation; 以及 ToolDispatcher
+     - zhipuAPI.py
+     - prompt_template.py
+     - chat_pdf.py 
+     - rag.py
+     - mem_walker.py
+     - self_rag.py
+     - corrective_rag.py # 现在还没写好这个，别跑！
+     - rag_dispatcher.py
+    finetune:
      - dpo_trainer.py
-     - sft_trainer.py
+     - sft_trainer.py  # SFTTrainer
+     - ppo_trainer.py
+     - grpo_trainer.py
      - multi_task_trainer.py
      - init.py
+    pretrain:
+     - pretrain.py
+     - init.py
     models:
-     - model.py
+     - qwen2
+        - modeling_qwen2.py
+        - configuration_qwen2.py
+        - tokenization_qwen2.py
+        - dola_decode.py
+     - model.py # TravelAgent类所在的位置
      - init.py
     ui:
      - app.py
@@ -113,21 +144,12 @@ configs:
      - init.py
 ```
 
-### Dataset
-1. 我们使用了一个旅游对话数据集：CrossWOZ
+
+## python script function explanation
+1. **`src/agents/agent.py`**
 
 
-- Dataset Citation:
 
-```bibtext
-@inproceedings{zhu2020crosswoz,  
-    title={CrossWOZ: A Large-Scale Chinese Cross-Domain Task-Oriented Dialogue Dataset},  
-    author={Zhu, Qi and Zhang, Zheng and Fang, Yan and Li, Xiang and Takanobu, Ryuichi and Li, Jinchao and Peng, Baolin and Gao, Jianfeng and Zhu, Xiaoyan and Huang, Minlie},  
-    booktitle={Transactions of the Association for Computational Linguistics},  
-    year={2020},  
-    url={https://arxiv.org/abs/2002.11893}  
-}
-```
 
 
 ## SFT Running Snapshot
@@ -174,3 +196,14 @@ Epoch  Rouge1   Rouge2  RougeL  BLEU
 - [GPT2](https://github.com/affjljoo3581/GPT2.git)
 - [RLHF_instructGPT](https://github.com/LanXiu0523/RLHF_instructGPT.git)
 
+- Dataset Citation:
+
+```bibtext
+@inproceedings{zhu2020crosswoz,  
+    title={CrossWOZ: A Large-Scale Chinese Cross-Domain Task-Oriented Dialogue Dataset},  
+    author={Zhu, Qi and Zhang, Zheng and Fang, Yan and Li, Xiang and Takanobu, Ryuichi and Li, Jinchao and Peng, Baolin and Gao, Jianfeng and Zhu, Xiaoyan and Huang, Minlie},  
+    booktitle={Transactions of the Association for Computational Linguistics},  
+    year={2020},  
+    url={https://arxiv.org/abs/2002.11893}  
+}
+```
