@@ -5,6 +5,8 @@ from src.agents.mem_walker import ChatPDFForMemWalker
 
 from src.agents.mem_walker import Navigator
 
+from src.agents.self_rag import SelfRAG
+
 
 from typing import Literal, Callable, Dict, Tuple
 
@@ -32,7 +34,7 @@ class RAGDispatcher():
             return self.rag(query)
 
         elif self.rag_type == "self_rag":
-            return self.self_rag(query)
+            return await self.self_rag(query)
         elif self.rag_type == "corrective_rag":
             return self.corrective_rag(query)
         
@@ -63,8 +65,12 @@ class RAGDispatcher():
     
     
     
-    def self_rag(self, query:str):
-        pass
+    async def self_rag(self, query:str):
+        rag = SelfRAG(model_type="api")  
+        chain = await rag.build_chain()  
+        
+        result = await chain.ainvoke(query)  
+        print(f"最终答案：{result}")  
     
     
     

@@ -125,6 +125,7 @@ PLAN_EXAMPLE =  """
 打开控制台运行
 python main.py --function rag_dispatcher
 
+python main.py --function rag_dispatcher --rag_type self_rag
 
 '''
 
@@ -201,8 +202,8 @@ def use_city_rag():
       
       
       
-async def use_rag_dispatcher():
-    rag_dispatcher = RAGDispatcher()
+async def use_rag_dispatcher(rag_type:str="self_rag"):
+    rag_dispatcher = RAGDispatcher(rag_type=rag_type)
    
    
     answer = await rag_dispatcher.dispatch("帮我规划一个广州三日游的方案")
@@ -240,6 +241,13 @@ async def parse_arguments(default_func = "use_agent"):
          default = default_func, 
          help="Choose the function from [train, inference, use_rag, use_agent, use_rag_web_demo, rag_dispatcher]"
          )
+      
+      parser.add_argument(
+         "--rag_type", 
+         type=str, 
+         default = "self_rag", 
+         help="This is useful when --function==rag_dispatcher, Choose the RAG type from [self_rag, rag, mem_walker]"
+         )
 
       # parser.add_argument(
       #    "--model", type=str, default="gpt-4o", help="model used for decoding. Please select from [gpt-4o, gpt-4o-mini]"
@@ -261,7 +269,7 @@ async def parse_arguments(default_func = "use_agent"):
       elif args.function == "use_agent":
           use_agent()
       elif args.function == "rag_dispatcher":
-          await use_rag_dispatcher()
+          await use_rag_dispatcher(args.rag_type)
       elif args.function == "use_rag_web_demo":
           use_rag_web_demo()
           
