@@ -153,12 +153,12 @@ configs:
 
 
 ## SFT Running Snapshot
-![SFT](image/sft_snapshot.png)
+![SFT](image/sft_train_snapshot.png)
 
 
 
 ## 根据 Travel Agent 的路线规划生成思维导图（Mind Map）运行结果
-![image](image/Snipaste_2024-12-30_20-16-28.png)
+![image](image/mindmap_output.png)
 
 
 
