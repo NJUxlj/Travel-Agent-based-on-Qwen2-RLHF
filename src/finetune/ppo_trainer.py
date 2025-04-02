@@ -10,6 +10,9 @@ from transformers import (
 from peft import LoraConfig, get_peft_model  
 import os  
 
+
+from datasets import load_dataset, load_from_disk
+
 class PPODataset(Dataset):  
     def __init__(self, tokenized_data):  
         self.data = tokenized_data  

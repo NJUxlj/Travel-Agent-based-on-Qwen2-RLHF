@@ -1,6 +1,13 @@
 ## 基于Qwen2.5+LoRA微调+RLHF+RAG的旅游路径规划智能体
 
-本项目希望借助轻量级大模型`Qwen2.5-0.5B~3B`帮助用户在本地更好地规划旅行路径，提高旅行体验。本项目是基于Qwen2.5+SFT微调+RLHF+RAG的旅游路径规划智能体。
+#### 注：
+- 如果各位运行项目出现问题无法解决的话，可以直接给我提issue，我会抽空fix的。
+- 最好附上报错截图。
+
+
+
+#### 项目的组成部分
+- 本项目希望借助轻量级大模型`Qwen2.5-0.5B~3B`帮助用户在本地更好地规划旅行路径，提高旅行体验。本项目是基于Qwen2.5+SFT微调+RLHF+RAG的旅游路径规划智能体。
 
 本项目有以下几个主要部分
 - Qwen2模型本体
@@ -19,10 +26,9 @@
     - ToolExecutor: 实际调用各种工具API的执行器。
     - ChatPDF
 
-    自定义RAG：
-
-
-    Langchain实现的RAG
+    传统RAG：
+    - 基于传统文档匹配+BM25实现的RAG
+    - 完全基于Langchain实现的RAG
 
 
     MemWalker:
@@ -30,6 +36,7 @@
     Self-RAG:
 
     RAG Dispatcher
+    - 可以通过用户传入的参数来选择调用 MemWalker, Self-RAG, 或是传统RAG
 
 
 - 前端UI
