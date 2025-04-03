@@ -9,7 +9,7 @@
 #### 项目的组成部分
 - 本项目希望借助轻量级大模型`Qwen2.5-0.5B~3B`帮助用户在本地更好地规划旅行路径，提高旅行体验。本项目是基于Qwen2.5+SFT微调+RLHF+RAG的旅游路径规划智能体。
 
-本项目有以下几个主要部分
+##### 本项目有以下几个主要部分
 - Qwen2模型本体
 
 - SFT + RLHF 系统
@@ -18,8 +18,8 @@
 - GRPOTrainer
 
 
-- RAG系统
-    辅助工具：
+##### RAG系统
+    **辅助工具**：
     - 工具调用系统 (Google Search + Weather API + Hotel Booking API + Plane Ticket API + Shortest Path API) 
     - 自定义的Prompt模板, 继承了 query+context+文档库匹配段落+工具列表+工具格式。它可以让大模型返回用户query命中的工具的函数API字符串. 
     - ToolDispatcher: 工具调度器，它可以解析用户query命中的工具的函数API字符串，随后使用ToolExecutor对象调用对应的工具函数。
@@ -31,15 +31,48 @@
     - 完全基于Langchain实现的RAG
 
 
-    MemWalker:
+    **MemWalker** [一种RAG方法，可以自己去搜paper]:
+    - 记忆树构建过程
+        - 将长文本分割成适合LLM上下文窗口的小块
+        - 使用LLM为每个段落生成摘要节点 (summary node / leaf node)
+        - 递归地将这些摘要进一步汇总形成高层次摘要节点 (parent node)
+        - 最终构建完整的树形记忆结构
 
-    Self-RAG:
+    - 交互式导航机制
+        - 从树的根节点开始导航
+        - LLM检查不同文本部分，确定与查询相关的路径, 最后LLM会通过相似度比较，一直走到某个叶节点。
+        - 最后通过自我纠错能力，判断该叶节点是不是需要的答案，如果不是，则回溯到父节点，继续搜寻下一个叶节点。
+
+    - 在遍历过程中维护工作记忆
+        - 能够从早期导航步骤中的错误中恢复, 通过让模型在叶节点输出 action=-1 / -2 / 0 这样的标识，来决定是否回溯。如果回溯，需要去【工作记忆】中找到父节点。
+        - 包含对导航决策的推理能力 【自主的路径分支判断】
+
+
+    **Self-RAG**:
+        -  自适应检索机制
+            - 模型可按需检索信息（可多次检索或完全跳过检索）
+            - 避免传统RAG中固定数量检索的局限性
+            - 动态决定何时需要外部知识支持 [模型通过是否输出一个 [Retrival] token 来决定是否需要检索外部知识源]
+
+        - 反思标记系统
+            - 使用特殊`反思标记[reflection tokens]`评估生成内容
+            - 对检索段落和自身生成内容进行批判性分析
+            - 标记内容的相关性、支持度和完整性 (如何标记？使用模型输出的3种反思token：[IS_SUP] [IS_REL] [IS_COM])
+        
+        - 三步执行流程
+            - 步骤1：决定是否需要检索（生成Retrival标记）
+            - 步骤2：同时处理多个检索段落，评估相关性并生成响应
+            - 步骤3：生成批评标记(Critic Token)，评价输出质量并选择最佳答案
+        
+        - 端到端训练方法
+            - 训练单一语言模型同时处理检索、生成和批评任务
+            - 使模型学会何时检索，如何批判自己的输出
 
     RAG Dispatcher
     - 可以通过用户传入的参数来选择调用 MemWalker, Self-RAG, 或是传统RAG
 
 
-- 前端UI
+##### 前端UI
  - Gradio
 
 
@@ -114,6 +147,8 @@ huggingface-cli download --resume-download BruceNju/crosswoz-sft --local-dir cro
 
 ## 如何运行
 
+- RAG
+
 ```shell
 # 使用最基础的 RAG
 python main.py --function use_rag
@@ -122,6 +157,26 @@ python main.py --function use_rag
 python main.py --function rag_dispatcher --rag_type self_rag
 ```
 
+- 测试SFT训练
+```bash
+python main.py --function train
+```
+
+- 单独测试PPO训练
+```bash
+python -m src.finetune.ppo_trainer
+
+```
+
+- 单独测试DPO训练
+```bash
+python -m src.finetune.dpo_trainer
+```
+
+- 单独测试GRPO训练
+```bash
+python -m src.finetune.grpo_trainer
+```
 
 
 
