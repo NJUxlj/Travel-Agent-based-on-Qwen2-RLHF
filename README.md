@@ -6,10 +6,10 @@
 
 
 
-#### 项目的组成部分
+### 项目的组成部分
 - 本项目希望借助轻量级大模型`Qwen2.5-0.5B~3B`帮助用户在本地更好地规划旅行路径，提高旅行体验。本项目是基于Qwen2.5+SFT微调+RLHF+RAG的旅游路径规划智能体。
 
-##### 本项目有以下几个主要部分
+- 项目的整体框架如下：
 
 - Qwen2模型本体
 
@@ -26,7 +26,7 @@
 
 
 
-##### RAG系统
+### RAG系统
 **辅助工具**：
 - 工具调用系统 (Google Search + Weather API + Hotel Booking API + Plane Ticket API + Shortest Path API) 
 - 自定义的Prompt模板, 继承了 query+context+文档库匹配段落+工具列表+工具格式。它可以让大模型返回用户query命中的工具的函数API字符串. 
@@ -80,7 +80,7 @@
     - 可以通过用户传入的参数来选择调用 MemWalker, Self-RAG, 或是传统RAG
 
 
-##### 前端UI
+### 前端UI
  - Gradio
 
 
