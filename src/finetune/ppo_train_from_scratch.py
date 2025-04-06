@@ -263,6 +263,7 @@ class Samples:
     '''
     seqs:torch.Tensor
     attention_mask:Optional[torch.LongTensor]
+    action_mask: Optional[torch.BoolTensor]
     num_actions: Union[int, torch.Tensor]
     packed_seq_lens: Optional[torch.Tensor]
     response_length: torch.Tensor
@@ -311,13 +312,114 @@ def get_advantages_and_returns(
     lambd: float
     ):
     '''
+    ### Args:
+        values: 价值模型预测的状态价值（V(s)），shape = (batch_size, seq_len)
+        rewards: 奖励模型预测的奖励（R_t），shape = (batch_size, seq_len)
+        action_mask: 动作掩码，指示哪些位置是有效动作，shape=(batch_size, seq_len)
+        gamma: 折扣因子
+    
+    
+    
     ### 原理：
         # A(t) = R(t) + gam*V(t+1) - V(t)
         # gae:A(t) = R(t) + gam*V(t+1) - V(t) + gam*lam*A(t+1)
         # 最后一个时刻的未来优势和未来收益为0：A(T+1) = 0, V(T+1) = 0,  则A(T) = R(T) - V(T), 得出A(T)
         # A(T-1) = R(T-1) + gam*V(T) - V(T-1) + gam*lam*A(T) 知道A(T)可计算A(T-1) 依次类推
         # returns(t) = A(t) + V(t) = = R(t) + gam * (V(t+1) + lam * A(t+1))
+
+        
+        returns(t) = A(t) + V(t) 
+            = [R(t) + gamma*V(t+1) - V(t)] + V(t)  # 代入普通优势函数定义
+            = R(t) + gamma*V(t+1)  # 标准的回报公式
+            
+        returns(t) = A(t) + V(t) 
+            = [R(t) + gamma*V(t+1) - V(t) + gam*lam*A(t+1)] + V(t)  # 代入广义优势函数定义
+            = R(t) + gamma*V(t+1) + gam*lam*A(t+1)  # 回报公式
     '''
+    
+    last_gae_lam = 0 # A_{T+1} 初始化为0， 因为最后一个时刻的未来优势和未来收益为0：A(T+1) = 0, V(T+1) = 0
+    
+    advantages_reversed = [] #  由于一开始我们从最后一步的优势 A_T = delta + gamma*lambda* A_{T+1} 开始计算， 因此最后需要把结果反转一下
+    
+    response_length = rewards.size(1)   # 一个轨迹中，最后的所有actions的长度 （或，所有 response tokens的长度） 
+    
+    
+    if action_mask is not None:
+        values = action_mask * values
+        rewards = action_mask * rewards
+        
+    for t in reversed(range(response_length)):
+    
+        nextvalues = values[:, t+1] if t <response_length-1 else 0.0 # V(t+1)    shape = (batch_size)
+        delta = rewards[:, t] + gamma * nextvalues - values[:, t] # delta = R(t) + gam*V(t+1) - V(t)     shape = (batch_size)
+        
+        last_gae_lam = delta + gamma * lambd * last_gae_lam # A(t) = delta + gam*lam*A(t+1) = R(t) + gam*V(t+1) - V(t) + gam*lam*A(t+1)       # shape  = (batch_size)
+
+        advantages_reversed.append(last_gae_lam)   # List[torch(batch,) for _ in range(response_length)]
+        
+        
+    advantages = torch.stack(advantages_reversed[::-1], dim=1)  # shape = (batch_size, response_length)
+    
+    returns = advantages + values  # 基本的预期回报公式
+
+    return advantages.detach(), returns
+
+
+
+def generate_samples(
+    prompts,
+    model,
+    max_length,
+    max_new_tokens,
+    n_samples_per_prompt,
+    micro_rollout_batch_size, # 轨迹数据集D中的一个 batch 的大小
+):
+    '''
+    采样一整个数据集D的轨迹数据
+    
+    '''
+    
+    samples_list = []
+    model.eval()
+    all_prompts = sum([[prompt]*n_samples_per_prompt for prompt in prompts], []) # 返回值：一个列表，包含每个prompt重复n_samples_per_prompt次的结果
+    
+    for i in range(0, len(all_prompts), micro_rollout_batch_size):
+        
+        prompts = all_prompts[i: i+micro_rollout_batch_size]
+        inputs = actor_tokenizer(prompts, padding = "max_length", max_length=max_length, truncation=True, return_tensor = "pt")
+        input_ids = inputs['input_ids']
+        seqs = model.generate(
+            **inputs.to(device),
+            max_new_tokens = max_new_tokens,
+            eos_token_id = eos_token_id,
+            pad_token_id = pad_token_id
+        ) # 生成完整的轨迹
+        
+        if seqs.size(1) >= max_new_tokens + max_length:
+            seqs = seqs[:, :max_new_tokens + max_length]  # 截断
+        else:
+            seqs = torch.cat([seqs, torch.full((seqs.size(0), max_new_tokens+max_length-seqs.size(1)), fill_value=pad_token_id, device = seqs.device)], dim=1)   # 补全
+        
+        
+        attention_mask = (seqs.ne(pad_token_id)).to(dtype = torch.long)
+        ans = seqs[:, input_ids.size(1):]
+        
+        action_mask = (ans.ne(pad_token_id) & ans.ne(eos_token_id)).to(dtype = torch.long)  # 最后一个有效 action的位置在每一个 sequence中都是相同的
+        
+        
+        samples = Samples(
+            seqs = seqs,
+            attention_mask = attention_mask,
+            action_mask = action_mask,
+            num_actions= action_mask.size(1),
+            packed_seq_lens = None,
+            response_length = action_mask.float().sum(dim=-1), 
+            total_length =  attention_mask.float().sum(dim=-1)
+            
+        )
+        
+    
+        return samples_list
     
     
 
@@ -420,13 +522,27 @@ def train():
     
     for episode in range(episodes):
         for rand_prompts in prompts_dataloader:
-             # 生成样本（获取模型推理结果）, 也叫做 生成轨迹数据集 D
+             # 生成样本（获取模型推理结果）
+                # 采样一个 数据集 D 的轨迹
             samples = generate_samples(rand_prompts, actor_model, max_length, max_new_tokens, n_samples_per_prompt, micro_rollout_batch_size)
             
              # 生成经验（获取优势、奖励、回报等）
             experiences = generate_experiences(samples) # 计算轨迹数据集D中的每条轨迹的奖励、回报、优势等
             
-            buffer.append(experiences)
+            buffer.append(experiences)  # buffer 只存储一个 数据集D的轨迹数据
+            
+            dataloader = DataLoader(buffer, batch_size = micro_train_batch_size, shuffle = True, collate_fn = collate_fn)
+            
+            torch.cuda.empty_cache()
+            
+            for epoch in range(max_epochs):  # 每个 数据集D 都要训练 max_epochs 轮
+                for experience in dataloader:      # 每个 experience 都是一个 mini-batch
+                    train_step(experience, steps)
+                    steps+=1
+            
+            
+            buffer.clear()
+            torch.cuda.empty_cache()
 
 
 
