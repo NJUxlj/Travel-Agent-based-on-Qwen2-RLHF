@@ -58,6 +58,8 @@ class Critic(nn.Module):
     def forward(self, input_ids, attention_mask, num_actions):
         '''
         num_asctions: 模型新推理了多少token
+        
+        return values: shape = (batch_size, num_actions)
         '''
         
         hidden_states = self.base_model.forward(
@@ -425,8 +427,10 @@ def generate_samples(
 
 
 
-def compute_rewards():
+def compute_rewards(kl, r, action_mask, kl_ctl, clip_reward_value):
     
+    kl_divergence_estimate = -kl_ctl * kl
+    rewards = kl_divergence_estimate
     
     steps = 0
     for episode in range(episodes):
@@ -435,7 +439,7 @@ def compute_rewards():
 
 
 
-def generate_experiences(samples_list):
+def generate_experiences(samples_list:List[Samples]):
     
     actor_model.eval()
     ref_model.eval()
@@ -446,16 +450,45 @@ def generate_experiences(samples_list):
     
     
     
-    for sample in samples_list:
-        pass
+    for samples in samples_list:
+        seqs = samples.seqs  # shape  =(bsz, max_len + max_new_tokens)
+        attention_mask = samples.attention_mask
+        action_mask = samples.action_mask
+        num_actions = samples.num_actions
+        
+        with torch.no_grad():
+            # 计算策略模型输出 token 的概率
+            output = actor_model(seqs, attention_mask = attention_mask)
+
     
+            logits  = output.logits  # shape = (bsz, max_len + max_new_tokens, vocab_size)
+            # 为什么取到-1：因为这是标准的"teacher forcing"做法，预测下一个token时不需要最后一个token的预测结果
+            log_probs = F.log_softmax(logits[:, :-1, :], dim=-1)  # shape = (bsz, max_len + max_new_tokens - 1, vocab_size)
+            # 为什么从1开始取：因为要获取每个token预测下一个token的概率（即用前n-1个token预测第n个token）
+            # gather操作：
+            #     在最后一个维度（dim=-1，即vocab维度）进行索引
+            #     效果：对于每个batch中的每个位置，选择实际生成的那个token对应的对数概率
+            #     相当于：log_probs_labels[i,j] = log_probs[i,j,seqs[i,j]] , 但是 seqs[i,j] 装的实际上是 seqs[i,j+1]位置的token id
+            log_probs_labels = log_probs.gather(dim=-1, index = seqs[:, 1:].unsqueeze(-1)) # shape = (bsz, max_len + max_new_tokens - 1, 1)
+            action_log_probs = log_probs_labels.squeeze(-1)[:, -num_actions:]  # shape = (bsz, num_actions)
+      
+            # 计算参考模型输出 token的概率
+            ref_output = ref_model(seqs, attention_mask = attention_mask)
+            ref_logits = ref_output.logits
+            ref_log_probs = F.log_softmax(ref_logits[:, :-1, :], dim=-1)
     
-    
-    
-    
-    
-    
-    
+            ref_log_probs_labels = ref_log_probs.gather(dim=-1, index = seqs[:,1:].unsqueeze(-1)) # shape = (bsz, max_len + max_new_tokens - 1, 1)
+
+            ref_action_log_probs = ref_log_probs_labels.squeeze(-1)[:, -num_actions:]
+            
+            # 计算价值
+            
+            value = critic_model.forward(seqs, attention_mask, num_actions).to(device)
+            
+            # 转换成文本
+            seq_texts = actor_tokenizer.batch_decode(seqs, skip_special_tokens = True)
+            
+            reward_model_inputs  =  reward_tokenizer(seq_texts, return_tensors="pt", padding=True)
     
     return experiences
 
@@ -476,10 +509,6 @@ class BufferItem:
     num_actions: Union[int, torch.Tensor]
     
     
-    
-    
-    
-
 
 def collate_fn(batch):
     seqs = []
