@@ -76,10 +76,6 @@ class Critic(nn.Module):
 
 
 
-def collate_fn(batch):
-    pass
-
-
 
 
 def compute_policy_loss(log_probs:torch.Tensor, old_log_probs:torch.Tensor, advantages, action_mask = None, clip_eps = 0.2):
@@ -307,8 +303,23 @@ def compute_approx_kl(
 
 
 
-def get_advantages_and_returns():
-    pass
+def get_advantages_and_returns(
+    values: torch.Tensor,
+    rewards: torch.Tensor,
+    action_mask: torch.Tensor,
+    gamma: float,
+    lambd: float
+    ):
+    '''
+    ### 原理：
+        # A(t) = R(t) + gam*V(t+1) - V(t)
+        # gae:A(t) = R(t) + gam*V(t+1) - V(t) + gam*lam*A(t+1)
+        # 最后一个时刻的未来优势和未来收益为0：A(T+1) = 0, V(T+1) = 0,  则A(T) = R(T) - V(T), 得出A(T)
+        # A(T-1) = R(T-1) + gam*V(T) - V(T-1) + gam*lam*A(T) 知道A(T)可计算A(T-1) 依次类推
+        # returns(t) = A(t) + V(t) = = R(t) + gam * (V(t+1) + lam * A(t+1))
+    '''
+    
+    
 
 
 
@@ -319,6 +330,72 @@ def compute_rewards():
     for episode in range(episodes):
         pass
 
+
+
+
+def generate_experiences(samples_list):
+    
+    actor_model.eval()
+    ref_model.eval()
+    reward_model.eval()
+    critic_model.eval()
+    
+    experiences  =[]
+    
+    
+    
+    for sample in samples_list:
+        pass
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    return experiences
+
+
+
+
+
+
+@dataclass
+class BufferItem:
+    seqs: torch.Tensor
+    action_log_probs: torch.Tensor
+    values: torch.Tensor
+    returns: torch.Tensor
+    advantages: torch.Tensor
+    attention_mask: torch.Tensor
+    action_mask: torch.Tensor
+    num_actions: Union[int, torch.Tensor]
+    
+    
+    
+    
+    
+
+
+def collate_fn(batch):
+    seqs = []
+    action_log_probs = []
+    values = []
+    returns = []
+    advantages = []
+    attention_mask = []
+    action_mask = []
+
+
+
+
+
+
+
+    
+    
 
     
     
