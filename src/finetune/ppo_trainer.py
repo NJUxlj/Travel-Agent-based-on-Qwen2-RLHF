@@ -6,8 +6,18 @@ from transformers import (
     TrainingArguments,  
     Trainer,  
     TrainerCallback,  
-    Qwen2ForCausalLM  
+    AutoModelForSequenceClassification
 )  
+
+
+from tqdm import tqdm
+
+
+from src.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
+
+from src.configs.config import REWARD_MODEL_PATH, MODEL_PATH, SFT_MODEL_PATH, PPO_MODEL_PATH, DPO_DATA_PATH
+
+
 from peft import LoraConfig, get_peft_model  
 import os  
 import numpy as np  
@@ -37,9 +47,10 @@ class PPOTrainer:
     """ 
     def __init__(  
         self,  
-        output_dir: str,  
-        dataset_path: str,  
-        model_name: str = "qwen/Qwen2-7B",  # 基础模型名称
+        output_dir: str = PPO_MODEL_PATH,  
+        dataset_path: str = DPO_DATA_PATH,  
+        model_name: str = MODEL_PATH,  # 基础模型名称
+        reward_model_name:str = REWARD_MODEL_PATH,
         clip_epsilon: float = 0.2,     # PPO裁剪参数，限制策略更新幅度
         gamma: float = 0.99,           # 折扣因子，控制未来奖励的重要性  
         gae_lambda: float = 0.95,      # GAE λ参数，平衡偏差和方差 
@@ -76,6 +87,17 @@ class PPOTrainer:
         # 冻结参考模型  
         for param in self.ref_model.parameters():  
             param.requires_grad = False  
+            
+            
+            
+        # 创建奖励模型    
+        self.reward_model = AutoModelForSequenceClassification.from_pretrained(
+            reward_model_name,
+            device_map="auto",
+            trust_remote_code=True
+        )
+        for param in self.reward_model.parameters():
+            param.requires_grad = False
         
         # 创建价值头网络（Critic）- 用于预测状态值函数V(s)  
         # 在PPO中，Actor-Critic架构是标准做法   
@@ -111,7 +133,7 @@ class PPOTrainer:
 
     def _prepare_dataset(self, dataset_path, max_length):  
         """数据预处理流程"""  
-        dataset = load_dataset(dataset_path, split="train")  
+        dataset = load_dataset(dataset_path, split="train").select(range(1000))  
         
         def process_fn(samples):  
             batch = {"input_ids": [], "attention_mask": [],  
@@ -128,15 +150,15 @@ class PPOTrainer:
                     padding="max_length",  
                     truncation=True,  
                     return_tensors="pt"  
-                )  
+                ).to(self.model.device)
                 
                 # 计算旧策略概率  
                 with torch.no_grad():  
-                    logits = self.model(**tokens).logits  
+                    logits = self.model(**tokens).logits.to(self.model.device)
                     log_probs = F.log_softmax(logits, dim=-1)  
                     old_log_probs = torch.gather(  
-                        log_probs, -1, tokens["input_ids"].unsqueeze(-1)  
-                    ).squeeze(-1)  
+                        log_probs, -1, tokens["input_ids"].unsqueeze(-1)    # 把整个序列的logprobs都收集起来了，而不是仅仅收集action的部分
+                    ).squeeze(-1)    # shape = (batch_size, seq_len)
                 
                 batch["input_ids"].append(tokens["input_ids"][0])  
                 batch["attention_mask"].append(tokens["attention_mask"][0])  
@@ -148,9 +170,13 @@ class PPOTrainer:
         tokenized_data = dataset.map(  
             process_fn,  
             batched=True,  
-            num_proc=4,  
+            num_proc=1,  
             remove_columns=dataset.column_names  
         )  
+        
+        tokenized_data.set_format(type="torch")
+        
+        
         return PPODataset(tokenized_data)  
 
     def ppo_collator(self, features):  
@@ -162,12 +188,29 @@ class PPOTrainer:
         }  
         
     def compute_rewards(self, model_outputs, response_ids, attention_mask, kl_coef=0.1):  
-        """计算奖励，包括外部奖励和KL惩罚"""  
+        """计算奖励，包括外部奖励和KL惩罚
+        
+        ###Args
+        
+        
+        
+        
+        ###Return
+        
+        """  
         # 这里示例使用简单奖励函数（可以替换为实际奖励函数）  
         # 例如，使用生成文本的长度作为正向奖励  
         rewards = []  
         
-        # 计算新策略生成的概率  
+        # 使用reward model计算外部奖励
+        with torch.no_grad():
+            reward_outputs = self.reward_model(
+                input_ids=response_ids,
+                attention_mask=attention_mask
+            )  # shape = (bsz, )
+            external_rewards = reward_outputs.logits.squeeze(-1)
+        
+        # 计算KL散度惩罚
         logits = model_outputs.logits  
         log_probs = F.log_softmax(logits, dim=-1)  
         new_log_probs = torch.gather(  
@@ -187,14 +230,14 @@ class PPOTrainer:
             ).squeeze(-1)  
             
         # 计算KL散度  
-        kl = (new_log_probs - ref_log_probs) * attention_mask  
+        kl = (new_log_probs - ref_log_probs) * attention_mask  # shape = (bsz, seq_len)
         
         # 生成简单奖励（例如基于令牌数量），这里仅作为示例  
         # 实际使用中应该替换为自定义奖励函数  
-        base_rewards = torch.sum(attention_mask, dim=-1).float() * 0.1  
+        # base_rewards = torch.sum(attention_mask, dim=-1).float() * 0.1  
         
-        # 应用KL惩罚  
-        rewards = base_rewards - kl_coef * torch.sum(kl, dim=-1)  
+        # 组合奖励
+        rewards = external_rewards - kl_coef * torch.sum(kl, dim=-1)  # shape = (bsz, )
         
         return rewards, new_log_probs, kl  
         
@@ -291,20 +334,68 @@ class PPOTrainer:
             max_grad_norm=0.5  
         )  
         
-        trainer = Trainer(  
-            model=self.model,  
-            args=train_args,  
-            train_dataset=self.dataset,  
-            data_collator=self.ppo_collator,  
-            compute_metrics=None,  
-            compute_loss=self.compute_loss  
-        )  
+        train_dataloader = torch.utils.data.DataLoader(
+            self.dataset,
+            batch_size=train_args.per_device_train_batch_size,
+            collate_fn=self.ppo_collator,
+            shuffle=True
+        )
+        
+        # 自定义的PPO算法无法使用huggingface官方的Trainer 
+        
+        # trainer = Trainer(  
+        #     model=self.model,  
+        #     args=train_args,  
+        #     train_dataset=self.dataset,  
+        #     data_collator=self.ppo_collator,  
+        #     compute_metrics=None,  
+        #     compute_loss=self.compute_loss  
+        # )  
         
         # PPO多轮优化  
-        for _ in range(self.ppo_epochs):  
-            trainer.train()  
+        for epoch in range(self.ppo_epochs):
+            progress_bar = tqdm(train_dataloader, desc=f"Epoch {epoch}")
+            
+            for batch in progress_bar:
+                self.optimizer.zero_grad()
+                
+                # 前向传播
+                outputs = self.model(
+                    input_ids=batch["input_ids"],
+                    attention_mask=batch["attention_mask"]
+                ).to(self.model.device)
+                
+                # 计算损失
+                loss = self.compute_loss(self.model, batch)
+                
+                # 反向传播
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), train_args.max_grad_norm)
+                self.optimizer.step()
+                
+                # 更新进度条
+                progress_bar.set_postfix(loss=loss.item())
+            
+            # 每个epoch结束后保存模型
+            self.save_model() 
             
     def save_model(self):  
-        save_path = os.path.join(self.output_dir, "qwen2_ppo")  
-        self.model.save_pretrained(save_path)  
-        self.tokenizer.save_pretrained(save_path)  
+        # save_path = os.path.join(self.output_dir, "qwen2_ppo")  
+        self.model.save_pretrained(self.output_dir)  
+        # self.tokenizer.save_pretrained(save_path)  
+        
+        
+        
+        
+        
+        
+
+
+
+
+if __name__ == "__main__":
+    
+    
+    trainer = PPOTrainer()
+    
+    trainer.train()
