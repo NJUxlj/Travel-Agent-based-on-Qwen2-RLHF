@@ -117,6 +117,19 @@ huggingface-cli download --resume-download JasleenSingh91/travel-QA --local-dir 
 
 ```
 
+
+## Download DPO dataset
+- 找不到旅游相关的DPO数据集，除非自己做。
+- 暂时拿这个冒充一下
+
+```bash
+cd src/data
+
+huggingface-cli download --resume-download --repo-type dataset HumanLLMs/Human-Like-DPO-Dataset --local-dir Human-Like-DPO-Dataset
+
+```
+
+
 ## Download RAG dataset
 
 ```bash

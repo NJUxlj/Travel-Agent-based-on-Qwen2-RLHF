@@ -38,6 +38,16 @@ SFT_MODEL_PATH = os.path.join(OUTPUT_DIR, SFT_MODEL_NAME)
 DPO_MODEL_NAME = "qwen2_dpo"
 DPO_MODEL_PATH = os.path.join(OUTPUT_DIR, DPO_MODEL_NAME)
 
+
+PPO_MODEL_NAME = "qwen2_ppo"
+PPO_MODEL_PATH = os.path.join(OUTPUT_DIR, PPO_MODEL_NAME)
+
+
+GRPO_MODEL_NAME = "qwen2_grpo"
+GRPO_MODEL_PATH = os.path.join(OUTPUT_DIR, GRPO_MODEL_NAME)
+
+
+
 SFT_DPO_MODEL_NAME = "qwen2_sft_dpo"
 SFT_DPO_MODEL_PATH = os.path.join(OUTPUT_DIR, SFT_DPO_MODEL_NAME)
 
@@ -45,6 +55,8 @@ SFT_DPO_MODEL_PATH = os.path.join(OUTPUT_DIR, SFT_DPO_MODEL_NAME)
 
 DATA_PATH = "src/data/travel_qa"
 RAG_DATA_PATH = "src/data/crosswoz-sft"
+
+DPO_DATA_PATH = "/root/autodl-tmp/Travel-Agent-based-on-Qwen2-RLHF/src/data/Human-Like-DPO-Dataset"
 
 DEEPSPEED_CONFIG_PATH = "src/configs/ds_config.json"
 
