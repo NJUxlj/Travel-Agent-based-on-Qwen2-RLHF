@@ -295,17 +295,39 @@ configs:
 
 
 ## RAG运行结果
-![image](https://github.com/user-attachments/assets/ceec5972-c689-47ba-91d9-9df160e54dd8)
-![image](https://github.com/user-attachments/assets/27aea7e5-620b-42dd-a68d-070c5c0be2cb)
-![image](https://github.com/user-attachments/assets/577a138a-f3e7-48f0-bd97-e319ae7982c7)
+
+- part1
+![image](image/regular_rag/rag1.png)
+
+- part2
+![image](image/regular_rag/rag3.png)
+
+- part3
+- 如你所见，还有一些bug。比如工具调用无法从response中解析出来，有空我来解决。
+![image](image/regular_rag/rag4.png)
+
+
+## Self-RAG 运行结果
+![image][image/self_rag/self_rag1.png]
+
+
+## Mem-Walker-RAG 运行结果
+
+- 运行结果 part1
+![image](image/mem_walker/memwalker1.png)
+
+
+- 运行结果 part2
+![image](image/mem_walker/memwalker2.png)
+
+
+- 运行结果 part3
+![image](image/mem_walker/memwalker_final_output.png)
 
 
 ## RAG Web Demo 运行结果
 ![rag_web_demo](image/rag_web_demo.png)
 ![rag_web_demo2](image/rag_web_demo2.png)
-
-#### 运行结果解释
-我们给RAG的问题包含了：question+context， context是由数据集中前5个与question最接近的样本组成的。
 
 
 
