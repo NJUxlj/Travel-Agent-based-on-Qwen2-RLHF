@@ -14,7 +14,14 @@ from transformers import (
 )  
 
 from src.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
-from src.configs.config import REWARD_MODEL_PATH, MODEL_PATH, SFT_MODEL_PATH, PPO_MODEL_PATH, DPO_DATA_PATH
+from src.configs.config import (
+    REWARD_MODEL_PATH, 
+    MODEL_PATH, 
+    SFT_MODEL_PATH, 
+    PPO_MODEL_PATH, 
+    DPO_DATA_PATH, 
+    CACHED_DPO_DATA_PATH
+)
 
 
 from peft import LoraConfig, get_peft_model  
@@ -351,4 +358,13 @@ class DPOCallback(TrainerCallback):
         
         最终得到的矩阵表示每个样本中每个token对应的对数概率值。
         '''
+    
+    
+    
+    
+
+
+
+if __name__ == "__main__":
+    trainer = CustomDPOTrainer()
     

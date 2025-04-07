@@ -13,6 +13,8 @@ from transformers import (
     DebertaV2Config
 )  
 
+from datasets import DatasetDict
+
 
 from tqdm import tqdm
 
@@ -185,7 +187,8 @@ class PPOTrainer:
             self.model = get_peft_model(self.model, self.peft_config)  
 
         # 准备训练数据集  
-        self.dataset = self._load_cached_dataset(self.cached_data_path)  
+        self.dataset, self.eval_dataset = self._load_cached_dataset(self.cached_data_path)  
+        
 
         # 配置优化器 - 同时优化策略模型和价值头   
         
@@ -218,17 +221,25 @@ class PPOTrainer:
         try:
             tokenized_data = load_from_disk(dataset_path)
             print("从缓存加载DPO数据集成功~~~")
-            tokenized_data.set_format(type="torch")
-            return PPODataset(tokenized_data)
+            # tokenized_data.set_format(type="torch")
+            train_data = tokenized_data['train']
+            eval_data = tokenized_data['validation']
+            return PPODataset(train_data), PPODataset(eval_data)
         except Exception as e:
             print(f"加载缓存的DPO数据集（tokenized）失败: {e}, 将重新预处理数据")
-            ppo_dataset = self._prepare_dataset(self.dataset_path, self.max_seq_length)
-            return ppo_dataset
+            ppo_train_data, ppo_eval_data = self._prepare_dataset(self.dataset_path, self.max_seq_length)
+            return ppo_train_data, ppo_eval_data
 
-    def _prepare_dataset(self, dataset_path, max_length, split='train'):  
+    def _prepare_dataset(self, dataset_path, max_length):  
         """数据预处理流程"""  
-        dataset = load_dataset(dataset_path, split=split).select(range(500))  
+        dataset = load_dataset(dataset_path)
+        train_dataset = load_dataset(dataset_path, split='train').select(range(500))  
         
+        if "validation" in dataset:
+            eval_dataset = load_dataset(dataset_path, split='validation').select(range(500)) 
+        else:
+            eval_dataset = load_dataset(dataset_path, split='train').select(range(500, 1000))  
+            
         def process_fn(samples):  
             batch = {"input_ids": [], "attention_mask": [],  
                     "response_ids": [], "old_log_probs": []}  
@@ -272,13 +283,24 @@ class PPOTrainer:
             
             return batch  
         
-        tokenized_data = dataset.map(  
+        train_data = train_dataset.map(  
             process_fn,  
             batched=True,  
             num_proc=1,  
-            remove_columns=dataset.column_names  
+            remove_columns=train_dataset.column_names  
         )  
         
+        val_data = eval_dataset.map(
+            process_fn,
+            batched=True,
+            num_proc=1,
+            remove_columns=eval_dataset.column_names
+        )
+        
+        tokenized_data = DatasetDict({
+            'train': train_data,
+            'validation': val_data
+        })
         
         
         # 保存预处理好的数据集到本地
@@ -286,9 +308,13 @@ class PPOTrainer:
             os.makedirs(CACHED_DPO_DATA_PATH, exist_ok=True)
         tokenized_data.save_to_disk(CACHED_DPO_DATA_PATH)
         
-        tokenized_data.set_format(type="torch")
         
-        return PPODataset(tokenized_data)  
+        train_data.set_format(type="torch")
+        val_data.set_format(type="torch")
+        
+        
+        
+        return PPODataset(train_data), PPODataset(val_data)
 
     def ppo_collator(self, features):  
         return {  
@@ -324,14 +350,14 @@ class PPOTrainer:
         # 使用reward model计算外部奖励
         with torch.no_grad():
             
-            print("reward_model_inputs['input_ids'].shape = ", reward_model_inputs['input_ids'].shape)
-            print("deberta_v2.config.max_length = ", DebertaV2Config().max_position_embeddings)
+            # print("reward_model_inputs['input_ids'].shape = ", reward_model_inputs['input_ids'].shape)
+            # print("deberta_v2.config.max_length = ", DebertaV2Config().max_position_embeddings)
             
-            reward_outputs = self.reward_model(
+            reward_outputs = self.reward_model.forward(
                 input_ids=reward_model_inputs['input_ids'],
                 attention_mask=reward_model_inputs['attention_mask']
-            )  # shape = (bsz, )
-            external_rewards = reward_outputs.logits.squeeze(-1)
+            )  # reward_outputs.logits.shape = (bsz, 1)
+            external_rewards = reward_outputs.logits.squeeze(-1)  # 奖励模型只是对整个序列做出打分
         
         # 计算KL散度惩罚
         logits = model_outputs.logits  
@@ -360,14 +386,26 @@ class PPOTrainer:
         # base_rewards = torch.sum(attention_mask, dim=-1).float() * 0.1  
         
         # 组合奖励
-        rewards = external_rewards - kl_coef * torch.sum(kl, dim=-1)  # shape = (bsz, )
+        # rewards = external_rewards - kl_coef * torch.sum(kl, dim=-1)  # shape = (bsz, )
+        rewards =  - kl_coef * kl
+        rewards[:, -1] += external_rewards
+        
         
         return rewards, new_log_probs, kl  
         
     def compute_gae(self, rewards, values, masks, gamma=0.99, lam=0.95):  
-        """计算广义优势估计(GAE)"""  
+        """计算广义优势估计(GAE)
+        
+        rewards.shape = (bsz, )
+        
+        values.shape = (bsz, seq_len)
+        
+        mask
+        
+        
+        """  
         advantages = torch.zeros_like(rewards)  
-        last_gae_lam = 0  
+        last_gae_lam = 0   # A_{T+1}==0
         
         # 反向遍历序列以计算GAE  
         for t in reversed(range(len(rewards))):  
@@ -403,11 +441,13 @@ class PPOTrainer:
             inputs["attention_mask"]  
         )  
         
+        # rewards.shape = (bsz, )
+        
         # 获取隐藏状态用于价值估计  
         # hidden_states = outputs.hidden_states[-1]  # 获取最后一层的隐藏状态  
         
         # 使用价值头计算每个token的价值  
-        values = critic_model.forward(input_ids = inputs["input_ids"], attention_mask=inputs["attention_mask"])   
+        values = critic_model.forward(input_ids = inputs["input_ids"], attention_mask=inputs["attention_mask"])   # shape = (bsz, seq_len)
         
         # 计算蒙版（用于忽略padding）  
         masks = inputs["attention_mask"]  
@@ -476,6 +516,8 @@ class PPOTrainer:
         #     compute_loss=self.compute_loss  
         # )  
         
+        best_eval_loss = float('inf')
+        
         # PPO多轮优化  
         for epoch in range(self.ppo_epochs):
             progress_bar = tqdm(train_dataloader, desc=f"PPO Epoch {epoch}")
@@ -510,10 +552,52 @@ class PPOTrainer:
             
             
             # 将更新后的策略模型参数复制给参考模型
-            self.ref_model.load_state_dict(self.model.state_dict())
+            self.ref_model.load_state_dict(self.model.state_dict(), strict=False)
+            
+            eval_loss = self.evaluate()
+            
+            # 保存最佳模型
+            if eval_loss < best_eval_loss:
+                best_eval_loss = eval_loss
+                # self.save_model()
+                print(f"New best eval loss: {best_eval_loss:.4f}")
             
             
         self.save_model() 
+        
+        
+        
+    def evaluate(self):
+        """评估模型性能"""
+        self.model.eval()
+        self.critic_model.eval()
+        
+        eval_dataloader = torch.utils.data.DataLoader(
+            self.eval_dataset,
+            batch_size=4,  # 评估batch_size可以小一些
+            collate_fn=self.ppo_collator,
+            shuffle=False
+        )
+        
+        total_loss = 0
+        total_samples = 0
+        
+        with torch.no_grad():
+            for batch in tqdm(eval_dataloader, desc="Evaluating"):
+                batch = {k: v.to(self.device) for k, v in batch.items()}
+                
+                # 计算损失
+                loss = self.compute_loss(self.model, self.critic_model, batch)
+                
+                total_loss += loss.item() * len(batch["input_ids"])
+                total_samples += len(batch["input_ids"])
+        
+        avg_loss = total_loss / total_samples
+        print(f"\nEvaluation - Average Loss: {avg_loss:.4f}")
+        
+        self.model.train()
+        self.critic_model.train()
+        return avg_loss
             
     def save_model(self):  
         # save_path = os.path.join(self.output_dir, "qwen2_ppo")  

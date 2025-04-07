@@ -353,6 +353,11 @@ configs:
 
 
 
+## PPOTrainer训练过程
+![ppo_from_scratch](image/ppo/ppo_trainer_running.png)
+
+
+
 ## SFT Evaluation Result
 ```Plain Text
 Epoch  Rouge1   Rouge2  RougeL  BLEU
