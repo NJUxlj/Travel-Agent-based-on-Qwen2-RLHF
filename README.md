@@ -282,6 +282,10 @@ configs:
 
 
 
+# Results
+---
+- 如果下面的图里没有，请自行去 `image` 文件夹中找你想要的结果
+
 ## SFT Running Snapshot
 ![SFT](image/SFT_train_snapshot.png)
 
@@ -296,19 +300,18 @@ configs:
 
 ## RAG运行结果
 
-- part1
-![image](image/regular_rag/rag1.png)
+|  |  |  |
+|:---:|:---:|:---:|
+| ![part1](image/regular_rag/rag1.png) | ![part2](image/regular_rag/rag3.png) | ![part3](image/regular_rag/rag4.png) |
+| 图1 | 图2 | 图3 |
 
-- part2
-![image](image/regular_rag/rag3.png)
 
-- part3
 - 如你所见，还有一些bug。比如工具调用无法从response中解析出来，有空我来解决。
-![image](image/regular_rag/rag4.png)
+
 
 
 ## Self-RAG 运行结果
-![image][image/self_rag/self_rag1.png]
+![image](image/self_rag/self_rag1.png)
 
 
 ## Mem-Walker-RAG 运行结果
