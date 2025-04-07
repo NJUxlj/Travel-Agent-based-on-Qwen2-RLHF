@@ -3,6 +3,8 @@
 src/data/travel_qa
 src/data/crosswoz-sft
 
+src/data/Human-Like-DPO-Dataset
+
 model_weights/
 outputs/
 output/
