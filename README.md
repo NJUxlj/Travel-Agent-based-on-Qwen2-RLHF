@@ -323,3 +323,16 @@ Epoch  Rouge1   Rouge2  RougeL  BLEU
     url={https://arxiv.org/abs/2002.11893}  
 }
 ```
+
+## Cite this Repo
+- if you want to use this work in your own project, please cite:
+
+```bibtex
+@misc{travel_agent_qwen2_rlhf,  
+  author       = {NJUxlj},  
+  title        = {Travel-Agent-based-on-Qwen2-RLHF},  
+  year         = {2025},  
+  howpublished = {\url{https://github.com/NJUxlj/Travel-Agent-based-on-Qwen2-RLHF.git}},  
+  note         = {A travel agent fine-tuned using SFT, DPO, PPO, and GRPO with a traveling Q\&A dataset. Includes mindmap generation and LangChain integration.}  
+}  
+```

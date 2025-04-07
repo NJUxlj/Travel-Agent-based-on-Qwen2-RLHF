@@ -186,22 +186,27 @@ def compute_entropy(log_probs: torch.Tensor, action_mask: Optional[torch.Tensor]
     计算策略的熵，用于鼓励探索
     
     参数:
-        log_probs: 策略模型输出的对数概率，shape=(batch_size, seq_len)
-        action_mask: 动作掩码，指示哪些位置是有效动作，shape=(batch_size, seq_len)
+        log_probs: 策略模型输出的对数概率，shape=(batch_size, num_actions)
+        action_mask: 动作掩码，指示哪些位置是有效动作，shape=(batch_size, num_actions)
         
     返回:
         torch.Tensor: 计算得到的熵标量值
         
     公式:
         entropy = -sum(exp(log_probs) * log_probs)
+
+    注意：
+        1. 熵计算是沿着动作维度(num_actions)进行的
+        2. 最终返回的是整个batch的平均熵值。
     '''
     probs = log_probs.exp()
-    entropy = - (probs * log_probs).sum(-1)  # shape=(batch_size, seq_len)
+    per_token_entropy = - (probs * log_probs) # shape = (bsz, num_actions)
+    entropy = per_token_entropy.sum(-1)  # shape = (bsz,)
     
     if action_mask is None:
-        return entropy.mean(-1).mean()
+        return entropy.mean()
     else:
-        return ((entropy * action_mask).sum(-1) / action_mask.sum(-1)).mean()
+        return ((per_token_entropy * action_mask).sum(-1)).mean()
     
     
     
@@ -286,7 +291,7 @@ class Samples:
     '''
     seqs:torch.Tensor
     attention_mask:Optional[torch.LongTensor]
-    action_mask: Optional[torch.BoolTensor]
+    action_mask: Optional[torch.BoolTensor]  # shape = (batch_size, seq_len)
     num_actions: Union[int, torch.Tensor]
     packed_seq_lens: Optional[torch.Tensor]
     response_length: torch.Tensor
@@ -462,13 +467,46 @@ def generate_samples(
 
 
 def compute_rewards(kl, r, action_mask, kl_ctl, clip_reward_value):
+    '''
+    ### Args:
+        kl: 策略模型输出的logits, shape  = (bsz, num_actions)
+        r: 奖励模型输出的奖励（R_t），shape = (batch_size, )
+        action_mask: 动作掩码，指示哪些位置是有效动作，shape=(batch_size, num_actions)
+        kl_ctl: KL散度的控制系数(权重)
+        clip_reward_value: 奖励裁剪阈值
+        
+    ### 最终返回的奖励tensor结构：
+        大部分token的奖励=KL惩罚
+        最后一个有效token的奖励=KL惩罚 + 裁剪后的奖励模型输出
+        
+    ### Return:
+        rewards: 奖励，shape = (bsz, num_actions)
+        
+    ### 注意:
+        这里，我们简化了每个token的奖励计算，仅仅认为他们是 -KL散度 (如果是序列中的最后一个token，还要加上奖励模型的预测分数)，
+            但在实际应用中，我们会用更加细致的奖励模型来预测每个token的奖励。
+    '''
     
-    kl_divergence_estimate = -kl_ctl * kl
-    rewards = kl_divergence_estimate
+    kl_divergence_estimate = -kl_ctl * kl   # 负号表示惩罚KL散度大的情况
+    rewards = kl_divergence_estimate   # shape = (bsz, num_actions)    # 初始奖励=KL惩罚
     
-    steps = 0
-    for episode in range(episodes):
-        pass
+    ends = action_mask.sum(1) + 1   # shape=(bsz,)
+    
+    if not isinstance(clip_reward_value, torch.Tensor):
+        clip_reward_value = torch.tensor(clip_reward_value).to(r.device)
+    # 对每个序列的最后一个token的奖励进行裁剪
+    reward_clip = torch.clamp(r, -clip_reward_value, clip_reward_value)  # shape = (bsz,)
+    
+    # 将裁剪后的最终奖励加到每个序列的最后一个有效token上
+    batch_size = r.size(0)
+    for j in range(batch_size):
+        rewards[j, :ends[j]][-1] += reward_clip[j, 0]  # 只在序列末尾加奖励
+        
+        
+        
+    return rewards
+    
+    
 
 
 
@@ -524,7 +562,7 @@ def generate_experiences(samples_list:List[Samples]):
             
             reward_model_inputs  =  reward_tokenizer(seq_texts, return_tensors="pt", padding=True)
 
-            r = reward_model(**reward_model_inputs.to(device)).logits # shape = (bsz, num_reward_labels)  # 奖励模型的输出，相当于生成最后一个token的奖励（结果奖励模型）
+            r = reward_model(**reward_model_inputs.to(device)).logits # shape = (bsz, )  # 奖励模型的输出，相当于生成最后一个token的奖励分数（结果奖励模型）
             
             # 计算 kl 散度
             kl = compute_approx_kl(
@@ -588,6 +626,25 @@ def collate_fn(batch):
     advantages = []
     attention_mask = []
     action_mask = []
+    
+    for x in batch:
+        seqs.append(x['seqs'])
+        action_log_probs.append(x['action_log_probs'])
+        values.append(x['values'])
+        returns.append(x['returns'])
+        advantages.append(x['advantages'])
+        attention_mask.append(x['attention_mask'])
+        action_mask.append(x['action_mask'])
+
+    seqs = torch.cat(seqs, dim=0)
+    action_log_probs = torch.cat(action_log_probs, dim=0)
+    values = torch.cat(values, dim=0)
+    returns = torch.cat(returns, dim=0)
+    advantages = torch.cat(advantages, dim=0)
+    attention_mask = torch.cat(attention_mask, dim=0)
+    action_mask = torch.cat(action_mask, dim=0)
+    
+    return BufferItem(seqs, action_log_probs, values, returns, advantages, attention_mask, action_mask, action_mask.size(1))
 
 
 
@@ -628,27 +685,43 @@ def train_step(experience:Experience, steps):
     log_probs_labels = log_probs.gather(dim=-1, index = sequences[:, 1:].unsqueeze(-1)) # shape = (batch_size, max_len + max_new_tokens - 1, 1)
     action_log_probs = log_probs_labels.squeeze(-1)[:,-num_actions:]  # shape = (batch_size, num_actions)
 
-
+    # 计算策略损失
     policy_loss = compute_policy_loss(action_log_probs, old_action_log_probs, advantages, action_mask = action_mask)
-    policy_loss.backward()
-    optimizer_actor.step()
+
+    # 计算熵
+    entropy = compute_entropy(action_log_probs, action_mask)  # 计算一个 mini-batch的平均entropy
     
-    writer.add_scalar("policy_loss", policy_loss.item(), steps)
-    
+    # 计算价值损失
     critic_model.train()
     optimizer_critic.zero_grad()
-    
     values = critic_model.forward(sequences, attention_mask, num_actions)  # shape = (batch_size, num_actions)
-
     value_loss = compute_value_loss(values, old_values, returns, action_mask)
     
-    value_loss.backward()
+
+    # 合并3种损失
+    total_loss = policy_loss + 0.5 * value_loss + 0.01 * entropy  # 系数可根据需要调整
     
+    # 反向传播
+    total_loss.backward()
+    optimizer_actor.step()
     optimizer_critic.step()
     
+    # policy_loss.backward()
+    # optimizer_actor.step()
+    
+    # writer.add_scalar("policy_loss", policy_loss.item(), steps)
+    # value_loss.backward()
+    # optimizer_critic.step()
+    # writer.add_scalar("value_loss", value_loss.item(), steps)
+    
+    # 记录日志
+    writer.add_scalar("policy_loss", policy_loss.item(), steps)
     writer.add_scalar("value_loss", value_loss.item(), steps)
+    writer.add_scalar("entropy", entropy.item(), steps)
+    writer.add_scalar("total_loss", total_loss.item(), steps)
 
-    print(f"step:{steps} policy_loss:{policy_loss.item():.4f} value_loss:{value_loss.item():.4f}" )
+    # print(f"step:{steps} policy_loss:{policy_loss.item():.4f} value_loss:{value_loss.item():.4f}" )
+    print(f"step:{steps} policy_loss:{policy_loss.item():.4f} value_loss:{value_loss.item():.4f} entropy:{entropy.item():.4f} total_loss:{total_loss.item():.4f}")
     
     
 def train():
@@ -713,7 +786,7 @@ if __name__ == "__main__":
     actor_model = AutoModelForCausalLM.from_pretrained('/home/user/Downloads/Qwen2.5-0.5B-Instruct').to(device)
     # 参考模型
     ref_model = AutoModelForCausalLM.from_pretrained('/home/user/Downloads/Qwen2.5-0.5B-Instruct').to(device)
-    # 奖励模型
+    # 奖励模型, 如何使用： score = reward_model(**input_ids).logits  # shape = (bsz, )
     reward_model = AutoModelForSequenceClassification.from_pretrained('/home/user/Downloads/reward-model-deberta-v3-large-v2').to(device)
     actor_tokenizer = AutoTokenizer.from_pretrained('/home/user/Downloads/Qwen2.5-0.5B-Instruct')
     reward_tokenizer = AutoTokenizer.from_pretrained('/home/user/Downloads/reward-model-deberta-v3-large-v2')
