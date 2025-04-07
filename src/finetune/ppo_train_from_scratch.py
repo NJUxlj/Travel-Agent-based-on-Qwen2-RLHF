@@ -172,7 +172,7 @@ def compute_value_loss(values, old_values, returns, action_mask = None, clip_eps
     
     
     if action_mask is None:
-        return loss.mean(-1).mean()
+        return loss.mean(-1).mean()  # 先对序列维度求平均，再对批次维度求平均
 
     else:
         return ((loss*action_mask).sum(-1) / action_mask.sum(-1)).mean()
@@ -180,7 +180,28 @@ def compute_value_loss(values, old_values, returns, action_mask = None, clip_eps
 
 
     
+
+def compute_entropy(log_probs: torch.Tensor, action_mask: Optional[torch.Tensor] = None):
+    '''
+    计算策略的熵，用于鼓励探索
     
+    参数:
+        log_probs: 策略模型输出的对数概率，shape=(batch_size, seq_len)
+        action_mask: 动作掩码，指示哪些位置是有效动作，shape=(batch_size, seq_len)
+        
+    返回:
+        torch.Tensor: 计算得到的熵标量值
+        
+    公式:
+        entropy = -sum(exp(log_probs) * log_probs)
+    '''
+    probs = log_probs.exp()
+    entropy = - (probs * log_probs).sum(-1)  # shape=(batch_size, seq_len)
+    
+    if action_mask is None:
+        return entropy.mean(-1).mean()
+    else:
+        return ((entropy * action_mask).sum(-1) / action_mask.sum(-1)).mean()
     
     
     
@@ -295,6 +316,11 @@ def compute_approx_kl(
     ref_log_probs: torch.Tensor, # 参考模型输出的logits
     action_mask: Optional[torch.Tensor] = None,
 ):
+    '''
+    log_probs.shape = (batch_size, seq_len)
+    
+    return log_ratio, shape = (batch_size, seq_len)
+    '''
     log_ratio = log_probs.float() - ref_log_probs.float()  # log(A/B) = logA - logB
     
     if action_mask  is not None:
@@ -337,6 +363,14 @@ def get_advantages_and_returns(
         returns(t) = A(t) + V(t) 
             = [R(t) + gamma*V(t+1) - V(t) + gam*lam*A(t+1)] + V(t)  # 代入广义优势函数定义
             = R(t) + gamma*V(t+1) + gam*lam*A(t+1)  # 回报公式
+            
+    ### Return: (advantages, returns)
+        advantages: 优势函数，用于衡量当前策略相对于旧策略的优势。
+            shape = (batch_size, seq_len)
+            
+        returns: shape=(batch_size, seq_len), 实际观察到的折扣回报（G_t）
+            shape = (batch_size, seq_len)
+            
     '''
     
     last_gae_lam = 0 # A_{T+1} 初始化为0， 因为最后一个时刻的未来优势和未来收益为0：A(T+1) = 0, V(T+1) = 0
@@ -483,12 +517,48 @@ def generate_experiences(samples_list:List[Samples]):
             
             # 计算价值
             
-            value = critic_model.forward(seqs, attention_mask, num_actions).to(device)
+            value = critic_model.forward(seqs, attention_mask, num_actions).to(device) # shape = (bsz, num_actions)
             
             # 转换成文本
             seq_texts = actor_tokenizer.batch_decode(seqs, skip_special_tokens = True)
             
             reward_model_inputs  =  reward_tokenizer(seq_texts, return_tensors="pt", padding=True)
+
+            r = reward_model(**reward_model_inputs.to(device)).logits # shape = (bsz, num_reward_labels)  # 奖励模型的输出，相当于生成最后一个token的奖励（结果奖励模型）
+            
+            # 计算 kl 散度
+            kl = compute_approx_kl(
+                action_log_probs,
+                ref_action_log_probs,
+                action_mask = action_mask
+            ).to(device) # shape = (bsz, num_actions)
+            
+            # 计算实际奖励
+            
+            
+            rewards = compute_rewards(kl, r, action_mask, kl_ctl=0.1, clip_reward_value=0.2) # shape = (bsz, num_actions)
+            
+            # 计算优势和回报
+            advantages, returns = get_advantages_and_returns(value, rewards, action_mask, gamma=0.1, lambd=0.2)
+
+        # actor_model.train()
+        # critic_model.train() 
+        experiences.append(
+            Experience(
+                seqs,
+                action_log_probs.detach(),
+                value.detach(),
+                returns.detach(),
+                advantages.detach(),
+                attention_mask,
+                action_mask,
+                r.detach(),
+                samples.response_length,
+                samples.total_length,
+                num_actions,
+                kl.detach()
+            )
+        )
     
     return experiences
 
@@ -530,18 +600,57 @@ def collate_fn(batch):
 
     
     
-def train_step(experience, steps):
+def train_step(experience:Experience, steps):
+    '''
+    做一个mini-batch的训练
+    '''
     
     actor_model.train()
     optimizer_actor.zero_grad()
+    
+    sequences = experience.seqs
+    old_action_log_probs = experience.action_log_probs  # 含义： 原始的actor模型输出的logits
+    advantages = experience.advantages  # shape = (batch_size, num_actions)
+    num_actions = experience.num_actions
+    attention_mask = experience.attention_mask
+    action_mask = experience.action_mask
+    old_values = experience.values
+    returns = experience.returns
+    
     
     
     logits = actor_model(
             sequences,
             attention_mask = attention_mask
         ).logits
+    
+    log_probs  = F.log_softmax(logits[:, :-1, :], dim =-1)  # shape = (batch_size, max_len + max_new_tokens - 1, vocab_size)
+    log_probs_labels = log_probs.gather(dim=-1, index = sequences[:, 1:].unsqueeze(-1)) # shape = (batch_size, max_len + max_new_tokens - 1, 1)
+    action_log_probs = log_probs_labels.squeeze(-1)[:,-num_actions:]  # shape = (batch_size, num_actions)
 
 
+    policy_loss = compute_policy_loss(action_log_probs, old_action_log_probs, advantages, action_mask = action_mask)
+    policy_loss.backward()
+    optimizer_actor.step()
+    
+    writer.add_scalar("policy_loss", policy_loss.item(), steps)
+    
+    critic_model.train()
+    optimizer_critic.zero_grad()
+    
+    values = critic_model.forward(sequences, attention_mask, num_actions)  # shape = (batch_size, num_actions)
+
+    value_loss = compute_value_loss(values, old_values, returns, action_mask)
+    
+    value_loss.backward()
+    
+    optimizer_critic.step()
+    
+    writer.add_scalar("value_loss", value_loss.item(), steps)
+
+    print(f"step:{steps} policy_loss:{policy_loss.item():.4f} value_loss:{value_loss.item():.4f}" )
+    
+    
 def train():
     # 初始化经验池, 经验池就是论文中的 轨迹数据集 D (Trajectories)
     buffer = ExperienceBuffer(limit=100)   # 先取 100 个 prompt， yong来生成轨迹
