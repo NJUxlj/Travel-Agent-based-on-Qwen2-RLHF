@@ -58,6 +58,8 @@ RAG_DATA_PATH = "src/data/crosswoz-sft"
 
 DPO_DATA_PATH = "/root/autodl-tmp/Travel-Agent-based-on-Qwen2-RLHF/src/data/Human-Like-DPO-Dataset"
 
+CACHED_DPO_DATA_PATH = "/root/autodl-tmp/Travel-Agent-based-on-Qwen2-RLHF/src/data/dpo_data_cached"
+
 DEEPSPEED_CONFIG_PATH = "src/configs/ds_config.json"
 
 PDF_FOLDER_PATH = "src/agents/travel_knowledge/tour_pdfs"
