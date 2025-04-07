@@ -311,7 +311,7 @@ configs:
 
 
 ## PPO from scratch 运行结果
-![ppo_from_scratch](image/ppo_from_scratch.png)
+![ppo_from_scratch](image/ppo/ppo_from_scratch.png)
 
 
 
