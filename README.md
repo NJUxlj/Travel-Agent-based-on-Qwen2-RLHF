@@ -173,7 +173,21 @@ python main.py --function rag_dispatcher --rag_type self_rag
 python main.py --function train
 ```
 
+- 单独测试PPO-from-scratch
+    - 注意，运行这个脚本之前请自行下载 [reward model权重](https://huggingface.co/OpenAssistant/reward-model-deberta-v3-large-v2)，并在 `config.py` 中配好 `REWARD_MODEL_PATH`
+
+```bash
+cd /root/autodl-tmp/models
+
+huggingface-cli download --resume-download OpenAssistant/reward-model-deberta-v3-large-v2 --local-dir reward-model-deberta-v3-large-v2
+```
+
+```bash
+python -m src.finetune.ppo_train_from_scratch
+```
+
 - 单独测试PPO训练
+    - 同样的，先去下好 reward model 的权重 
 ```bash
 python -m src.finetune.ppo_trainer
 
@@ -294,6 +308,10 @@ configs:
 我们给RAG的问题包含了：question+context， context是由数据集中前5个与question最接近的样本组成的。
 
 
+
+
+## PPO from scratch 运行结果
+![ppo_from_scratch](image/ppo_from_scratch.png)
 
 
 

@@ -24,6 +24,9 @@ NUM_PROCESSES = 2
 OUTPUT_DIR = "output/"
 MODEL_PATH = "/root/autodl-tmp/models/Qwen2.5-0.5B"
 
+
+REWARD_MODEL_PATH = "/root/autodl-tmp/models/reward-model-deberta-v3-large-v2"
+
 EMBEDDING_MODEL_PATH = "/root/autodl-tmp/models/all-MiniLM-L6-v2"
 
 EMBEDDING_MODEL_PATH_BPE = "D:\\models\\bge-small-en-v1.5"

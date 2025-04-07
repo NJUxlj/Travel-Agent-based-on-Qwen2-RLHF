@@ -11,6 +11,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 from typing import List, Tuple, Union, Dict, Optional
 
+from src.configs.config import MODEL_PATH, REWARD_MODEL_PATH
+
 
 
 # 构建dataset
@@ -33,7 +35,7 @@ class PromptDataset(Dataset):
     def __len__(self):
         return len(self.prompts)
 
-    def __getitem(self, idx):
+    def __getitem__(self, idx):
         return self.final_prompts[idx]
     
     
@@ -160,7 +162,7 @@ def compute_value_loss(values, old_values, returns, action_mask = None, clip_eps
         或
         loss = unclipped_loss  # 当不使用clip时
     '''
-    if clip_eps is None:
+    if clip_eps is not None:
         values_clipped = old_values + (values - old_values).clamp(-clip_eps, clip_eps)
         surrogate1 = (values_clipped- returns)**2
         surrogate2 = (values - returns) ** 2
@@ -414,10 +416,13 @@ def generate_samples(
     max_new_tokens,
     n_samples_per_prompt,
     micro_rollout_batch_size, # 轨迹数据集D中的一个 batch 的大小
-):
+)->List[Samples]:
     '''
     采样一整个数据集D的轨迹数据
     
+    return List[Samples]
+
+        where lene(Samples) == micro_rollout_batch_size    
     '''
     
     samples_list = []
@@ -427,7 +432,7 @@ def generate_samples(
     for i in range(0, len(all_prompts), micro_rollout_batch_size):
         
         prompts = all_prompts[i: i+micro_rollout_batch_size]
-        inputs = actor_tokenizer(prompts, padding = "max_length", max_length=max_length, truncation=True, return_tensor = "pt")
+        inputs = actor_tokenizer(prompts, padding = "max_length", max_length=max_length, truncation=True, return_tensors = "pt")
         input_ids = inputs['input_ids']
         seqs = model.generate(
             **inputs.to(device),
@@ -435,6 +440,8 @@ def generate_samples(
             eos_token_id = eos_token_id,
             pad_token_id = pad_token_id
         ) # 生成完整的轨迹
+        
+        # seqs.shape = (micro_rollout_batch_size, max_new_tokens + max_length)
         
         if seqs.size(1) >= max_new_tokens + max_length:
             seqs = seqs[:, :max_new_tokens + max_length]  # 截断
@@ -458,6 +465,8 @@ def generate_samples(
             total_length =  attention_mask.float().sum(dim=-1)
             
         )
+        
+        samples_list.append(samples)
         
     
         return samples_list
@@ -511,7 +520,7 @@ def compute_rewards(kl, r, action_mask, kl_ctl, clip_reward_value):
 
 
 
-def generate_experiences(samples_list:List[Samples]):
+def generate_experiences(samples_list:List[Samples])->List[Experience]:
     
     actor_model.eval()
     ref_model.eval()
@@ -523,7 +532,7 @@ def generate_experiences(samples_list:List[Samples]):
     
     
     for samples in samples_list:
-        seqs = samples.seqs  # shape  =(bsz, max_len + max_new_tokens)
+        seqs = samples.seqs  # seqs.shape = (micro_rollout_batch_size, max_new_tokens + max_length)
         attention_mask = samples.attention_mask
         action_mask = samples.action_mask
         num_actions = samples.num_actions
@@ -619,7 +628,16 @@ class BufferItem:
     
 
 def collate_fn(batch):
-    seqs = []
+    '''
+    batch: List[Experience]  -> List[Samples]
+    
+    len(batch) == micro_train_batch_size == 2
+    
+    len(Samples) == micro_rollout_batch_size == 2
+    
+    一个 batch中包含了 micro_train_batch_size* micro_rollout_batch_size 个轨迹样本
+    '''
+    seqs:List[List] = []     # [ [seq1, seq2], [seq3, seq4] ]
     action_log_probs = []
     values = []
     returns = []
@@ -636,7 +654,7 @@ def collate_fn(batch):
         attention_mask.append(x['attention_mask'])
         action_mask.append(x['action_mask'])
 
-    seqs = torch.cat(seqs, dim=0)
+    seqs = torch.cat(seqs, dim=0) # 在行方向纵向拼接两个序列成为一个矩阵
     action_log_probs = torch.cat(action_log_probs, dim=0)
     values = torch.cat(values, dim=0)
     returns = torch.cat(returns, dim=0)
@@ -652,11 +670,6 @@ def collate_fn(batch):
 
 
 
-    
-    
-
-    
-    
 def train_step(experience:Experience, steps):
     '''
     做一个mini-batch的训练
@@ -735,7 +748,7 @@ def train():
         for rand_prompts in prompts_dataloader:
              # 生成样本（获取模型推理结果）
                 # 采样一个 数据集 D 的轨迹
-            samples = generate_samples(rand_prompts, actor_model, max_length, max_new_tokens, n_samples_per_prompt, micro_rollout_batch_size)
+            samples:List[Samples] = generate_samples(rand_prompts, actor_model, max_length, max_new_tokens, n_samples_per_prompt, micro_rollout_batch_size)
             
              # 生成经验（获取优势、奖励、回报等）
             experiences = generate_experiences(samples) # 计算轨迹数据集D中的每条轨迹的奖励、回报、优势等
@@ -765,13 +778,16 @@ if __name__ == "__main__":
     max_epochs = 5
     # 一次从提示词数据集中取多少条数据用于生成经验 
     rollout_batch_size = 8
-    # 一次取多少条数据生成经验（生成经验需要多个模型推理，对显存要求高）
+    # 一次取多少条数据生成经验（生成经验需要多个模型推理，对显存要求高） # mini-batch
     micro_rollout_batch_size = 2
     # 一个提示词生成多少个样本
     n_samples_per_prompt = 2
     
+    # 下面的prompt_dataset 可以看做是一个更大的数据集 D'，从中，我们每次获取一个子集 D
     
     # 轨迹数据集 D 的大小 =  rollout_batch_size *  n_samples_per_prompt
+    
+    # 每次从D中拿出 mini-batch(micro_rollout_batch_size, 或 micro_train_batch_size)条轨迹用来更新 actor_model (online policy)
     
     
     # 生成的最大长度，相当于最大动作数，数值越大，模型探索的可能性越多
@@ -783,13 +799,17 @@ if __name__ == "__main__":
     # 记录日志
     writer = SummaryWriter('./runs')
     # 策略模型
-    actor_model = AutoModelForCausalLM.from_pretrained('/home/user/Downloads/Qwen2.5-0.5B-Instruct').to(device)
+    actor_model = AutoModelForCausalLM.from_pretrained(MODEL_PATH).to(device)
     # 参考模型
-    ref_model = AutoModelForCausalLM.from_pretrained('/home/user/Downloads/Qwen2.5-0.5B-Instruct').to(device)
+    ref_model = AutoModelForCausalLM.from_pretrained(MODEL_PATH).to(device)
     # 奖励模型, 如何使用： score = reward_model(**input_ids).logits  # shape = (bsz, )
-    reward_model = AutoModelForSequenceClassification.from_pretrained('/home/user/Downloads/reward-model-deberta-v3-large-v2').to(device)
-    actor_tokenizer = AutoTokenizer.from_pretrained('/home/user/Downloads/Qwen2.5-0.5B-Instruct')
-    reward_tokenizer = AutoTokenizer.from_pretrained('/home/user/Downloads/reward-model-deberta-v3-large-v2')
+    reward_model = AutoModelForSequenceClassification.from_pretrained(REWARD_MODEL_PATH).to(device)
+    
+    
+    # actor_tokenizer = AutoTokenizer.from_pretrained('/home/user/Downloads/Qwen2.5-0.5B-Instruct')
+    actor_tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+    
+    reward_tokenizer = AutoTokenizer.from_pretrained(REWARD_MODEL_PATH)
     # 价值模型
     critic_model = Critic(actor_model.base_model).to(device)
     
