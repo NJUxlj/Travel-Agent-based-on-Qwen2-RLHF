@@ -203,6 +203,8 @@ class DPOTrainerWrapper:
             compute_metrics=self._compute_metrics,  # 计算模型选择正确偏好的比例
         )  
         
+        
+        
     def _get_ref_model(self):
         """创建并返回参考模型"""
         ref_model = Qwen2ForCausalLM.from_pretrained(MODEL_PATH)
