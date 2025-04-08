@@ -27,16 +27,16 @@
       },
       "_type": "Sequence"
     },
-    "response_ids": {
+    "chosen_labels": {
       "feature": {
         "dtype": "int64",
         "_type": "Value"
       },
       "_type": "Sequence"
     },
-    "old_log_probs": {
+    "rejected_labels": {
       "feature": {
-        "dtype": "float32",
+        "dtype": "int64",
         "_type": "Value"
       },
       "_type": "Sequence"

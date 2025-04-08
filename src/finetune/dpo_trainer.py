@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Optional, Dict , List, Tuple, Callable
 import os  
 import torch  
+import torch.nn as nn
 import torch.nn.functional as F  
 from torch.utils.data import Dataset  
 from transformers import (  
@@ -10,7 +11,7 @@ from transformers import (
     # Qwen2ForCausalLM,  
     BitsAndBytesConfig,
     Trainer,  
-    TrainerCallback  
+    TrainerCallback,
 )  
 
 from src.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
@@ -20,19 +21,31 @@ from src.configs.config import (
     SFT_MODEL_PATH, 
     PPO_MODEL_PATH, 
     DPO_DATA_PATH, 
-    CACHED_DPO_DATA_PATH
+    CACHED_DPO_DATA_PATH,
+    DPO_MODEL_PATH
 )
 
 
-from peft import LoraConfig, get_peft_model  
-from datasets import load_dataset  
+from peft import LoraConfig, get_peft_model
+from peft.peft_model import PeftModel, PeftModelForCausalLM
+from datasets import load_dataset, load_from_disk, DatasetDict
 # from trl import DPOTrainer  
 # import deepspeed  
 from deepspeed import DeepSpeedEngine 
 
 
 
-class CustomDPODataset(Dataset):  
+from dataclasses import dataclass
+
+@dataclass
+class DPOTrainingConfig:
+    batch_size: int = 4
+    learning_rate: float = 2e-5
+    max_grad_norm: float = 0.3
+    num_train_epochs: int = 3
+
+
+class DPODataset(Dataset):  
     def __init__(self, tokenized_data):  
         self.data = tokenized_data  
         
@@ -46,32 +59,113 @@ class CustomDPODataset(Dataset):
             "chosen_labels": self.data["chosen_labels"][idx],  
             "rejected_labels": self.data["rejected_labels"][idx]  
         }  
+        
+        
+class DPOTrainer(Trainer):
+    def __init__(self, ref_model, beta=0.1, **kwargs):  
+        super().__init__(**kwargs)  
+        self.ref_model = ref_model  
+        self.beta = beta  
+        
+        self.device = self.ref_model.device
+        
+        
+    def compute_loss(self, model, inputs, num_items_in_batch=None):  
+        """核心DPO损失计算"""  
+        
+        inputs = {k:v.to(self.device) for k,v in inputs.items()}
+        # 前向传播获取logits  
+        outputs = model(  
+            input_ids=inputs["input_ids"],  
+            attention_mask=inputs["attention_mask"]  
+        )  
+        
+        # 获取chosen和rejected的log概率  
+        chosen_log_probs = self._get_log_probs(outputs.logits, inputs["chosen_labels"])  
+        rejected_log_probs = self._get_log_probs(outputs.logits, inputs["rejected_labels"])  
+        
+        # 计算参考模型的log概率  
+        with torch.no_grad():  
+            ref_outputs = self.ref_model(  
+                input_ids=inputs["input_ids"],  
+                attention_mask=inputs["attention_mask"]  
+            )  
+            ref_chosen_log_probs = self._get_log_probs(ref_outputs.logits, inputs["chosen_labels"])  # 计算 log(π(y|x))
+            ref_rejected_log_probs = self._get_log_probs(ref_outputs.logits, inputs["rejected_labels"])  
+        
+        # 计算DPO损失  L = -log(σ(r(x,y_w) - r(x,y_l))) , where r(x,y) = β * log(π(y|x)/π_ref(y|x)) = β * [log(π(y|x)) - log(π_ref(y|x))]
+        losses = -F.logsigmoid(  
+            self.beta * (  
+                (chosen_log_probs - ref_chosen_log_probs) -     # log(π(y_win|x)/π_ref(y_win|x))
+                (rejected_log_probs - ref_rejected_log_probs)  
+            )  
+        )  
+        
+        loss = losses.mean()  
+        return loss
 
-class CustomDPOTrainer:  
+    def _get_log_probs(self, logits, labels):  
+        """
+        计算每个token的对数概率
+        
+        ##Args:
+        logits: x  shape = (batch_size, seq_len, vocab_size)
+        labels: y  shape = (batch_size, seq_len)
+        
+        计算 log(π(y|x))
+        
+        为了以后计算 reward r(x,y) = β * log(π(y|x)/π_ref(y|x)) 
+        
+        
+        ##Return
+        返回值：(batch_size, seq_len)
+            每个位置的值表示对应token的对数概率
+                
+        """  
+        log_probs = F.log_softmax(logits, dim=-1)  
+        # 在 log_probs 的最后一个维度（vocab_size维度）上，根据 labels 的索引收集对应的对数概率
+        return torch.gather(log_probs, -1, labels.unsqueeze(-1)).squeeze(-1)  
+
+
+
+
+class DPOTrainerWrapper:  
     def __init__(  
         self,  
-        output_dir: str,  
-        dataset_name_or_path: str,  
+        output_dir: str = DPO_MODEL_PATH,  
+        dataset_name_or_path: str = DPO_DATA_PATH,  
+        cached_dataset_name_or_path:str = CACHED_DPO_DATA_PATH,
         model_name: str = MODEL_PATH,  
         is_ds: bool = True,  
         ds_config_path: Optional[str] = None,  
-        is_peft: bool = True,  
+        is_peft: bool = False,  
         peft_config: Optional[LoraConfig] = None,  
         is_quantized: bool = False,  
         bnb_config: Optional[BitsAndBytesConfig] = None,  
         max_seq_length: int = 1024,  
-        beta: float = 0.1  
+        beta: float = 0.1,
+        dpo_training_config = None
     ):  
         self.output_dir = output_dir  
         self.dataset_name_or_path = dataset_name_or_path  
+        self.cached_dataset_name_or_path = cached_dataset_name_or_path
         self.beta = beta  
         self.max_seq_length = max_seq_length  
         self.is_quantized = is_quantized
+        
+        
+        self.dpo_training_config = dpo_training_config or DPOTrainingConfig()
+        
 
         # 初始化模型和tokenizer  
         self.model, self.tokenizer = self._init_model_and_tokenizer(  
             model_name, is_quantized, bnb_config  
         )  
+        
+        self.device = self.model.device
+        
+        
+        self.ref_model = self._get_ref_model()
         
         # 应用LoRA  
         if is_peft:  
@@ -79,13 +173,13 @@ class CustomDPOTrainer:
             self.model = get_peft_model(self.model, self.peft_config)  
 
         # 准备数据集  
-        self.dataset = self._prepare_dataset()  
-
+        self.dataset, self.eval_dataset = self._load_cached_dataset(self.cached_dataset_name_or_path)
         # 配置训练参数  
         self.training_args = TrainingArguments(  
+            label_names= ["chosen_labels", "rejected_labels"], # 防止 peft 报错
             output_dir=output_dir,  
             deepspeed=ds_config_path if is_ds else None,  
-            per_device_train_batch_size=4,  
+            per_device_train_batch_size= self.dpo_training_config.batch_size,  
             gradient_accumulation_steps=2,  
             learning_rate=2e-5,  
             bf16=True,  
@@ -94,21 +188,35 @@ class CustomDPOTrainer:
             remove_unused_columns=False,  
             optim="adamw_torch",  
             max_grad_norm=0.3,  
-            num_train_epochs=3  
+            num_train_epochs=3,
+            report_to = 'none'
         )  
 
         # 初始化自定义Trainer  
-        self.trainer = Trainer(  
+        self.trainer = DPOTrainer(  
+            ref_model = self.ref_model,
+            beta = self.beta,
             model=self.model,  
             args=self.training_args,  
             train_dataset=self.dataset,  
             data_collator=self.dpo_collator,  
-            compute_metrics=self._compute_metrics,  
-            callbacks=[DPOCallback()]  
+            compute_metrics=self._compute_metrics,  # 计算模型选择正确偏好的比例
         )  
+        
+    def _get_ref_model(self):
+        """创建并返回参考模型"""
+        ref_model = Qwen2ForCausalLM.from_pretrained(MODEL_PATH)
+        ref_model.load_state_dict(self.model.state_dict())
+        ref_model = ref_model.to(self.device)
+        ref_model.eval()
+        for param in ref_model.parameters():
+            param.requires_grad = False
+        return ref_model
 
     def _init_model_and_tokenizer(self, model_name, is_quantized, bnb_config):  
         """初始化模型和分词器"""  
+        
+        
         bnb_config = bnb_config or BitsAndBytesConfig(  
             load_in_4bit=True,  
             bnb_4bit_quant_type="nf4",  
@@ -140,20 +248,69 @@ class CustomDPOTrainer:
             task_type="CAUSAL_LM"  
         )  
 
-    def _prepare_dataset(self):  
-        """数据预处理管道"""  
-        dataset = load_dataset(self.dataset_name_or_path, split="train")  
-        dataset = dataset.filter(self._data_filter)  
+    def _load_cached_dataset(self, dataset_path=CACHED_DPO_DATA_PATH):
+        if not os.path.exists(dataset_path):
+            os.makedirs(CACHED_DPO_DATA_PATH, exist_ok=True)
+        try:
+            tokenized_data = load_from_disk(dataset_path)
+            print("从缓存加载DPO数据集成功~~~")
+            tokenized_data.set_format(type="torch")  # 确保在执行 dpo_collator 之前，数据格式被转换为torch张量
+            train_data = tokenized_data['train']
+            eval_data = tokenized_data['validation']
+            return DPODataset(train_data), DPODataset(eval_data)
+        except Exception as e:
+            print(f"加载缓存的DPO数据集（tokenized）失败: {e}, 将重新预处理数据")
+            ppo_train_data, ppo_eval_data = self._prepare_dataset(self.dataset_name_or_path)
+            return ppo_train_data, ppo_eval_data
+    
+    
+    def _prepare_dataset(self, dataset_path):  
+        """数据预处理"""  
+        dataset = load_dataset(dataset_path)
+        train_dataset = load_dataset(dataset_path, split='train').select(range(500))  
         
-        # 并行化tokenize处理  
-        tokenized_data = dataset.map(  
+        if "validation" in dataset:
+            eval_dataset = load_dataset(dataset_path, split='validation').select(range(500)) 
+        else:
+            eval_dataset = load_dataset(dataset_path, split='train').select(range(500, 1000))  
+        
+        train_dataset = train_dataset.filter(self._data_filter)  
+        eval_dataset = eval_dataset.filter(self._data_filter)  
+        
+        
+        train_data = train_dataset.map(  
             self._tokenize_function,  
             batched=True,  
-            num_proc=4,  
-            remove_columns=dataset.column_names  
+            num_proc=1,  
+            remove_columns=train_dataset.column_names  
         )  
         
-        return CustomDPODataset(tokenized_data)  
+        val_data = eval_dataset.map(
+            self._tokenize_function,
+            batched=True,
+            num_proc=1,
+            remove_columns=eval_dataset.column_names
+        )
+        
+        tokenized_data = DatasetDict({
+            'train': train_data,
+            'validation': val_data
+        })
+        
+        
+        # 保存预处理好的数据集到本地
+        if not os.path.exists(CACHED_DPO_DATA_PATH):
+            os.makedirs(CACHED_DPO_DATA_PATH, exist_ok=True)
+        tokenized_data.save_to_disk(CACHED_DPO_DATA_PATH)
+        
+        
+        train_data.set_format(type="torch")
+        val_data.set_format(type="torch")
+        
+        
+        
+        return DPODataset(train_data), DPODataset(val_data)
+        
 
     def _data_filter(self, sample):  
         """数据过滤逻辑"""  
@@ -207,7 +364,23 @@ class CustomDPOTrainer:
         return batch  
 
     def _compute_metrics(self, eval_pred):  
-        """自定义评估指标"""  
+        """自定义评估指标
+        
+        eval_pred.predictions  == (logits_chosen, logits_rejected)
+        
+        eval_pred.predictions包含两个部分：
+            模型对优选回答的预测logits(logits_chosen)和对拒绝回答的预测logits(logits_rejected)
+         
+        ### Return
+        accuracy = (logits_chosen > logits_rejected).mean()
+            比较这两个logits的大小关系，计算模型正确偏好(即优选回答得分高于拒绝回答)的比例
+            
+        ### 注意：  
+            1. 这里的logits实际上是模型对完整序列(提示+回答)的预测值
+            2. 比较的是整个序列的综合评分，而不仅仅是单个token
+            3. 指标值在0-1之间，1表示完美偏好学习
+        
+        """  
         logits_chosen, logits_rejected = eval_pred.predictions  
         accuracy = (logits_chosen > logits_rejected).mean()  
         return {"dpo_accuracy": accuracy}  
@@ -215,12 +388,28 @@ class CustomDPOTrainer:
     def train(self):  
         """启动训练流程"""  
         self.trainer.train()  
+        
+        
+        
+        
+    
 
     def save_model(self):  
         """模型保存逻辑"""  
-        save_path = os.path.join(self.output_dir, "qwen2_cmed_dpo")  
-        self.trainer.save_model(save_path)  
-        self.tokenizer.save_pretrained(save_path)  
+        if not os.path.exists(DPO_MODEL_PATH):
+            os.makedirs(DPO_MODEL_PATH, exist_ok=True)
+        self.model.save_pretrained(DPO_MODEL_PATH)  
+
+
+
+
+
+
+
+
+
+
+
 
 class DPOCallback(TrainerCallback):  
     def on_train_begin(self, args, state, control, **kwargs):  
@@ -228,13 +417,30 @@ class DPOCallback(TrainerCallback):
         self.model = kwargs.pop("model")  
         if isinstance(self.model, DeepSpeedEngine):  
             self.model = self.model.module  
+            
+        if isinstance(self.model, PeftModel) or isinstance(self.model, PeftModelForCausalLM):
+            self.model = self.model.base_model
 
     def on_step_begin(self, args, state, control, **kwargs):  
-        """梯度累积期间冻结参考模型"""  
-        if state.global_step == 0:  
-            # 初始化参考模型参数  
-            self.ref_model = self._clone_model(self.model)  
-            self.ref_model.requires_grad_(False)  
+        # """梯度累积期间冻结参考模型"""  
+        # if state.global_step == 0:  
+        #     # 初始化参考模型参数  
+        #     self.ref_model = self._clone_model(self.model)  
+        #     # self.ref_model.requires_grad_(False)
+        #     self._frozen_model(self.ref_model)
+        
+        """不再需要在这里初始化ref_model"""
+        pass
+            
+            
+    def _frozen_model(self, model:nn.Module):
+        """冻结模型参数"""
+        if hasattr(model, 'named_parameters'):
+            for param in model.parameters():
+                param.requires_grad = False
+        else:
+            raise ValueError("传入的对象不是有效的PyTorch模型")
+        
 
     def _clone_model(self, model):  
         """
@@ -245,60 +451,11 @@ class DPOCallback(TrainerCallback):
         **model.config.to_dict()：将模型的配置转换为字典并解包为关键字参数
         type(model)(**model.config.to_dict())：使用原始模型的配置创建一个新的模型实例
         """  
-        return type(model)(**model.config.to_dict()).load_state_dict(model.state_dict())  
+        cloned_model = Qwen2ForCausalLM.from_pretrained(MODEL_PATH)
+        cloned_model.load_state_dict(model.state_dict())
+        return cloned_model
 
-    def compute_loss(self, model, inputs, return_outputs=False):  
-        """核心DPO损失计算"""  
-        # 前向传播获取logits  
-        outputs = model(  
-            input_ids=inputs["input_ids"],  
-            attention_mask=inputs["attention_mask"]  
-        )  
-        
-        # 获取chosen和rejected的log概率  
-        chosen_log_probs = self._get_log_probs(outputs.logits, inputs["chosen_labels"])  
-        rejected_log_probs = self._get_log_probs(outputs.logits, inputs["rejected_labels"])  
-        
-        # 计算参考模型的log概率  
-        with torch.no_grad():  
-            ref_outputs = self.ref_model(  
-                input_ids=inputs["input_ids"],  
-                attention_mask=inputs["attention_mask"]  
-            )  
-            ref_chosen_log_probs = self._get_log_probs(ref_outputs.logits, inputs["chosen_labels"])  # 计算 log(π(y|x))
-            ref_rejected_log_probs = self._get_log_probs(ref_outputs.logits, inputs["rejected_labels"])  
-        
-        # 计算DPO损失  L = -log(σ(r(x,y_w) - r(x,y_l))) , where r(x,y) = β * log(π(y|x)/π_ref(y|x)) = β * [log(π(y|x)) - log(π_ref(y|x))]
-        losses = -F.logsigmoid(  
-            self.beta * (  
-                (chosen_log_probs - ref_chosen_log_probs) -     # log(π(y_win|x)/π_ref(y_win|x))
-                (rejected_log_probs - ref_rejected_log_probs)  
-            )  
-        )  
-        
-        return losses.mean()  
-
-    def _get_log_probs(self, logits, labels):  
-        """
-        计算每个token的对数概率
-        
-        ##Args:
-        logits: x  shape = (batch_size, seq_len, vocab_size)
-        labels: y  shape = (batch_size, seq_len)
-        
-        计算 log(π(y|x))
-        
-        为了以后计算 reward r(x,y) = β * log(π(y|x)/π_ref(y|x)) 
-        
-        
-        ##Return
-        返回值：(batch_size, seq_len)
-            每个位置的值表示对应token的对数概率
-                
-        """  
-        log_probs = F.log_softmax(logits, dim=-1)  
-        # 在 log_probs 的最后一个维度（vocab_size维度）上，根据 labels 的索引收集对应的对数概率
-        return torch.gather(log_probs, -1, labels.unsqueeze(-1)).squeeze(-1)  
+    
     
     
     
@@ -366,5 +523,7 @@ class DPOCallback(TrainerCallback):
 
 
 if __name__ == "__main__":
-    trainer = CustomDPOTrainer()
+    trainer = DPOTrainerWrapper()
+    
+    trainer.train()
     
