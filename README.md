@@ -358,6 +358,11 @@ configs:
 
 
 
+## DPOTrainer训练过程
+![image](image/dpo/dpo_trainer_running.png)
+
+
+
 ## SFT Evaluation Result
 ```Plain Text
 Epoch  Rouge1   Rouge2  RougeL  BLEU
