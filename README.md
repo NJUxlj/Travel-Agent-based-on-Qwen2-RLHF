@@ -377,6 +377,9 @@ Epoch  Rouge1   Rouge2  RougeL  BLEU
 - [ai-travel-agent](https://github.com/nirbar1985/ai-travel-agent.git)
 - [GPT2](https://github.com/affjljoo3581/GPT2.git)
 - [RLHF_instructGPT](https://github.com/LanXiu0523/RLHF_instructGPT.git)
+- [PPO_reproduce]()
+- [GraphRAG_Paper](https://arxiv.org/pdf/2404.16130)
+- [GraphRAG_Repo](https://github.com/microsoft/graphrag.git)
 
 - Dataset Citation:
 
