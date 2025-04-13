@@ -27,7 +27,8 @@ from src.configs.config import (
     SFT_MODEL_PATH, 
     PPO_MODEL_PATH, 
     DPO_DATA_PATH,
-    CACHED_DPO_DATA_PATH
+    CACHED_DPO_DATA_PATH,
+    CACHED_PPO_DATA_PATH,
 )
 
 
@@ -116,7 +117,7 @@ class PPOTrainer:
         self,  
         output_dir: str = PPO_MODEL_PATH,  
         dataset_path: str = DPO_DATA_PATH,  
-        cached_data_path:str = CACHED_DPO_DATA_PATH,
+        cached_data_path:str = CACHED_PPO_DATA_PATH,
         model_name: str = MODEL_PATH,  # 基础模型名称
         reward_model_name:str = REWARD_MODEL_PATH,
         clip_epsilon: float = 0.2,     # PPO裁剪参数，限制策略更新幅度
@@ -215,9 +216,9 @@ class PPOTrainer:
         )  
         
         
-    def _load_cached_dataset(self, dataset_path=CACHED_DPO_DATA_PATH):
+    def _load_cached_dataset(self, dataset_path=CACHED_PPO_DATA_PATH):
         if not os.path.exists(dataset_path):
-            os.makedirs(CACHED_DPO_DATA_PATH, exist_ok=True)
+            os.makedirs(CACHED_PPO_DATA_PATH, exist_ok=True)
         try:
             tokenized_data = load_from_disk(dataset_path)
             print("从缓存加载DPO数据集成功~~~")
@@ -304,9 +305,9 @@ class PPOTrainer:
         
         
         # 保存预处理好的数据集到本地
-        if not os.path.exists(CACHED_DPO_DATA_PATH):
-            os.makedirs(CACHED_DPO_DATA_PATH, exist_ok=True)
-        tokenized_data.save_to_disk(CACHED_DPO_DATA_PATH)
+        if not os.path.exists(CACHED_PPO_DATA_PATH):
+            os.makedirs(CACHED_PPO_DATA_PATH, exist_ok=True)
+        tokenized_data.save_to_disk(CACHED_PPO_DATA_PATH)
         
         
         train_data.set_format(type="torch")

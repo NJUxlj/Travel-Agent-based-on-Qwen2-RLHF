@@ -58,7 +58,10 @@ RAG_DATA_PATH = "src/data/crosswoz-sft"
 
 DPO_DATA_PATH = "/root/autodl-tmp/Travel-Agent-based-on-Qwen2-RLHF/src/data/Human-Like-DPO-Dataset"
 
+CACHED_SFT_DATA_PATH = "/root/autodl-tmp/Travel-Agent-based-on-Qwen2-RLHF/src/data/sft_data_cached"
 CACHED_DPO_DATA_PATH = "/root/autodl-tmp/Travel-Agent-based-on-Qwen2-RLHF/src/data/dpo_data_cached"
+CACHED_GRPO_DATA_PATH = "/root/autodl-tmp/Travel-Agent-based-on-Qwen2-RLHF/src/data/grpo_data_cached"
+CACHED_PPO_DATA_PATH = "/root/autodl-tmp/Travel-Agent-based-on-Qwen2-RLHF/src/data/ppo_data_cached"
 
 DEEPSPEED_CONFIG_PATH = "src/configs/ds_config.json"
 
