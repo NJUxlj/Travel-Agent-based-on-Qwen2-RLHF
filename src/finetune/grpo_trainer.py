@@ -58,7 +58,7 @@ KL散度惩罚：
 '''
 
 
-class QADataset(torch.utils.data.Dataset):  
+class QADataset(Dataset):  
     """  
     用于问答评估的数据集类  
     """  
@@ -85,6 +85,10 @@ class QADataset(torch.utils.data.Dataset):
 class CustomGRPODataset(Dataset):  
     def __init__(self, tokenized_data):  
         self.data = tokenized_data  
+        self.input_ids = tokenized_data["input_ids"]  
+        self.attention_mask = tokenized_data["attention_mask"]  
+        self.rejected_input_ids = tokenized_data["rejected_input_ids"]
+        self.rejected_attention_mask = tokenized_data["rejected_attention_mask"]  
         
     def __len__(self):  
         return len(self.data["input_ids"])  
@@ -93,8 +97,8 @@ class CustomGRPODataset(Dataset):
         return {  
             "input_ids": self.data["input_ids"][idx],  
             "attention_mask": self.data["attention_mask"][idx],  
-            "response_ids": self.data["response_ids"][idx] if "response_ids" in self.data else None,  
-            "group_labels": self.data["group_labels"][idx] if "group_labels" in self.data else None  
+            "rejected_input_ids": self.data["rejected_input_ids"][idx],  
+            "rejected_attention_mask": self.data["rejected_attention_mask"][idx]  
         }  
 
 
@@ -510,10 +514,10 @@ class GRPOTrainerWrapper:
         
         # 使用PyTorch内置的pad_sequence或您已有的填充方法  
         if hasattr(self, "_pad_sequences"):  
-            batch["input_ids"] = self._pad_sequences(batch["input_ids"])  
-            batch["attention_mask"] = self._pad_sequences(batch["attention_mask"])  
-            batch["rejected_input_ids"] = self._pad_sequences(batch["rejected_input_ids"])  
-            batch["rejected_attention_mask"] = self._pad_sequences(batch["rejected_attention_mask"])  
+            batch["input_ids"] = self._pad_sequences(batch["input_ids"], max_seq_length= self.max_seq_length)  
+            batch["attention_mask"] = self._pad_sequences(batch["attention_mask"], max_seq_length= self.max_seq_length)  
+            batch["rejected_input_ids"] = self._pad_sequences(batch["rejected_input_ids"], max_seq_length= self.max_seq_length)  
+            batch["rejected_attention_mask"] = self._pad_sequences(batch["rejected_attention_mask"], max_seq_length= self.max_seq_length)  
         else:  
             # 使用PyTorch内置的padding  
             from torch.nn.utils.rnn import pad_sequence  
@@ -612,34 +616,56 @@ class GRPOTrainerWrapper:
     
 
     def grpo_collator(self, features):  
-        """GRPO数据整理函数，处理批次数据"""  
-        # 填充输入序列  
-        input_ids = pad_sequence([f["input_ids"] for f in features], batch_first=True, padding_value=self.tokenizer.pad_token_id)  
-        attention_mask = pad_sequence([f["attention_mask"] for f in features], batch_first=True, padding_value=0)  
+        """  
+        将多个样本组合成一个批次，用于GRPO训练  
         
-        # 如果有response_ids，填充它们  
-        if features[0]["response_ids"] is not None:  
-            response_ids = pad_sequence([f["response_ids"] for f in features], batch_first=True, padding_value=self.tokenizer.pad_token_id)  
-        else:  
-            response_ids = None  
+        Args:  
+            features: 样本列表，每个样本包含input_ids、attention_mask等  
             
-        # 如果有group_labels，收集它们  
-        if features[0]["group_labels"] is not None:  
-            group_labels = torch.stack([f["group_labels"] for f in features])  
-        else:  
-            group_labels = None  
-            
-        batch = {  
-            "input_ids": input_ids,  
-            "attention_mask": attention_mask,  
-        }  
+        Returns:  
+            包含批次数据的字典  
+        """  
+        # 初始化结果字典  
+        batch = {}  
         
-        if response_ids is not None:  
-            batch["response_ids"] = response_ids  
+        # 检查是否为训练数据（包含rejected_input_ids）  
+        is_train = "rejected_input_ids" in features[0]  
+        
+        if is_train:  
+            # 处理训练批次（包含chosen和rejected）  
+            batch = {  
+                "input_ids": torch.stack([f["input_ids"] for f in features]),  
+                "attention_mask": torch.stack([f["attention_mask"] for f in features]),  
+                "rejected_input_ids": torch.stack([f["rejected_input_ids"] for f in features]),  
+                "rejected_attention_mask": torch.stack([f["rejected_attention_mask"] for f in features]),  
+            }  
             
-        if group_labels is not None:  
-            batch["group_labels"] = group_labels  
+            # 生成group_ids - 每个样本一个组，用于GRPO中区分不同问题的回答对  
+            batch_size = len(features)  
+            batch["group_ids"] = torch.arange(0, batch_size, dtype=torch.long)  
             
+            # 确保张量格式正确  
+            batch["input_ids"] = batch["input_ids"].to(torch.long)  
+            batch["attention_mask"] = batch["attention_mask"].to(torch.long)  
+            batch["rejected_input_ids"] = batch["rejected_input_ids"].to(torch.long)  
+            batch["rejected_attention_mask"] = batch["rejected_attention_mask"].to(torch.long)  
+            
+        else:  
+            # 处理评估批次  
+            batch = {  
+                "input_ids": torch.stack([f["input_ids"] for f in features]),  
+                "attention_mask": torch.stack([f["attention_mask"] for f in features]),  
+            }  
+            
+            # 如果存在labels字段，也添加到批次中  
+            if "labels" in features[0]:  
+                batch["labels"] = torch.stack([f["labels"] for f in features])  
+                batch["labels"] = batch["labels"].to(torch.long)  
+            
+            # 确保张量格式正确  
+            batch["input_ids"] = batch["input_ids"].to(torch.long)  
+            batch["attention_mask"] = batch["attention_mask"].to(torch.long)  
+        
         return batch  
 
 
