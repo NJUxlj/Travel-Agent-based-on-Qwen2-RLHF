@@ -129,6 +129,14 @@ huggingface-cli download --resume-download --repo-type dataset HumanLLMs/Human-L
 
 ```
 
+## Download GRPO dataset
+- 和DPO用的是一样的数据集
+```bash
+cd src/data
+
+huggingface-cli download --resume-download --repo-type dataset HumanLLMs/Human-Like-DPO-Dataset --local-dir Human-Like-DPO-Dataset
+```
+
 
 ## Download RAG dataset
 
