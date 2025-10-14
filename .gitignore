@@ -7,6 +7,21 @@ src/data/Human-Like-DPO-Dataset
 
 src/data/MultiTurn_GRPO
 
+# 防止提交大型数据集文件
+*.json
+!**/small_*.json
+!**/config*.json
+!**/package*.json
+!**/tsconfig*.json
+
+# 大型数据文件
+*.parquet
+*.csv
+*.tsv
+*.txt
+!**/requirements*.txt
+!**/README*.txt
+
 model_weights/
 outputs/
 output/
