@@ -87,8 +87,6 @@ class CustomGRPODataset(Dataset):
         self.data = tokenized_data  
         self.input_ids = tokenized_data["input_ids"]  
         self.attention_mask = tokenized_data["attention_mask"]  
-        self.rejected_input_ids = tokenized_data["rejected_input_ids"]
-        self.rejected_attention_mask = tokenized_data["rejected_attention_mask"]  
         
     def __len__(self):  
         return len(self.data["input_ids"])  
@@ -96,9 +94,7 @@ class CustomGRPODataset(Dataset):
     def __getitem__(self, idx):  
         return {  
             "input_ids": self.data["input_ids"][idx],  
-            "attention_mask": self.data["attention_mask"][idx],  
-            "rejected_input_ids": self.data["rejected_input_ids"][idx],  
-            "rejected_attention_mask": self.data["rejected_attention_mask"][idx]  
+            "attention_mask": self.data["attention_mask"][idx]  
         }  
 
 
@@ -118,6 +114,7 @@ class GRPOTrainer(Trainer):
         ref_model,
         tokenizer,
         max_seq_length,
+        grpo_config: Optional[GRPOConfig] = None,
         **kwargs  
     ):  
         super().__init__(**kwargs)
@@ -126,6 +123,14 @@ class GRPOTrainer(Trainer):
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
         self.device = self.ref_model.device
+        
+        # GRPO配置参数
+        self.grpo_config = grpo_config or GRPOConfig()
+        self.beta = self.grpo_config.beta
+        self.group_size = self.grpo_config.group_size
+        self.mu = self.grpo_config.mu
+        self.kl_coef = self.grpo_config.kl_coef
+        self.scale_rewards = self.grpo_config.scale_rewards
         
     def compute_metrics(self, eval_preds):  
         """计算评估指标  
@@ -151,8 +156,13 @@ class GRPOTrainer(Trainer):
         attention_mask = inputs["attention_mask"]  
         batch_size = input_ids.shape[0]  
         
-        # 计算每组的大小（如果不能整除，最后一组可能会小于group_size）  
-        num_groups = (batch_size + self.group_size - 1) // self.group_size  
+        # 获取group_ids（如果存在）
+        group_ids = inputs.get("group_ids", None)
+        if group_ids is None:
+            # 如果没有group_ids，假设每2个样本组成一个组
+            group_ids = torch.arange(0, batch_size // 2, dtype=torch.long).repeat_interleave(2)
+            if len(group_ids) < batch_size:
+                group_ids = torch.cat([group_ids, group_ids[-1:] * (batch_size - len(group_ids))])
         
         # 前向传播获取当前策略的logits  
         outputs = model(  
@@ -180,36 +190,30 @@ class GRPOTrainer(Trainer):
             ref_logits = ref_outputs.logits  
             ref_log_probs = self._get_batch_logprobs(ref_logits, labels, non_padding_mask)  
         
-        # 收集每个组的log_probs和ref_log_probs  
-        group_log_probs = []  
-        group_ref_log_probs = []  
+        # 计算KL散度（log_p - log_ref_p）  
+        kl_divs = log_probs - ref_log_probs  
         
-        for i in range(num_groups):  
-            start_idx = i * self.group_size  
-            end_idx = min((i + 1) * self.group_size, batch_size)  
-            
-            # 收集当前组的对数概率  
-            group_log_probs.append(log_probs[start_idx:end_idx])  
-            group_ref_log_probs.append(ref_log_probs[start_idx:end_idx])  
+        # 计算组内优势
+        advantages = []
+        unique_groups = torch.unique(group_ids)
         
-        # 计算组内的优势函数  
-        advantages = []  
-        
-        for g_log_probs, g_ref_log_probs in zip(group_log_probs, group_ref_log_probs):  
-            # 计算当前组内的KL散度（log_p - log_ref_p）  
-            kl_divs = g_log_probs - g_ref_log_probs  
+        for group_id in unique_groups:
+            group_mask = group_ids == group_id
+            group_kl_divs = kl_divs[group_mask]
             
-            # 计算相对优势：使用每个样本在组内的相对得分  
-            group_mean = kl_divs.mean()  
+            if len(group_kl_divs) > 1:
+                # 计算组内相对优势
+                group_mean = group_kl_divs.mean()
+                if self.scale_rewards:
+                    group_std = group_kl_divs.std() + 1e-8
+                    group_advantages = (group_kl_divs - group_mean) / group_std
+                else:
+                    group_advantages = group_kl_divs - group_mean
+            else:
+                # 如果组内只有一个样本，优势为0
+                group_advantages = torch.zeros_like(group_kl_divs)
             
-            # 计算每个样本的优势（相对于组均值）  
-            if self.scale_rewards and len(kl_divs) > 1:  
-                group_std = kl_divs.std() + 1e-8  # 添加小的epsilon以防止除零  
-                sample_advantages = (kl_divs - group_mean) / group_std  
-            else:  
-                sample_advantages = kl_divs - group_mean  
-                
-            advantages.append(sample_advantages)  
+            advantages.append(group_advantages)
         
         # 将所有优势合并回一个张量  
         all_advantages = torch.cat(advantages)  
@@ -329,10 +333,11 @@ class GRPOTrainerWrapper:
             ref_model = self.ref_model,
             tokenizer = self.tokenizer,
             max_seq_length= self.max_seq_length,
+            grpo_config=self.grpo_config,
             model=self.model,  
             args=self.training_args,  
             train_dataset=self.dataset,  
-            eval_dataset = self.eval_dataset,
+            eval_dataset=self.eval_dataset,
             data_collator=self.grpo_collator,  
             # compute_metrics=self._compute_metrics,
         )  
@@ -420,12 +425,24 @@ class GRPOTrainerWrapper:
         train_data.set_format(type="torch")
         val_data.set_format(type="torch")
         
-        return CustomGRPODataset(train_data), QADataset(val_data)
+        self.eval_dataset = QADataset(val_data)
+        return CustomGRPODataset(train_data)
 
     def _data_filter(self, sample):  
-        return all([sample["prompt"], sample["answer"]]) and \
-               len(sample["prompt"]) <= 512 and \
-               len(sample["answer"]) <= 1024  
+        # 检查训练数据（DPO格式）
+        if "chosen" in sample and "rejected" in sample:
+            return all([sample["prompt"], sample["chosen"], sample["rejected"]]) and \
+                   len(sample["prompt"]) <= 512 and \
+                   len(sample["chosen"]) <= 1024 and \
+                   len(sample["rejected"]) <= 1024
+        # 检查评估数据（SFT格式）
+        elif "Question" in sample and ("Answer" in sample or "Response" in sample):
+            answer_field = "Answer" if "Answer" in sample else "Response"
+            return all([sample["Question"], sample[answer_field]]) and \
+                   len(sample["Question"]) <= 512 and \
+                   len(sample[answer_field]) <= 1024
+        else:
+            return False  
                
                
 
@@ -433,98 +450,63 @@ class GRPOTrainerWrapper:
         """  
         处理训练数据集（DPO格式，包含prompt, chosen, rejected）  
         返回适用于GRPO训练的格式  
+        
+        GRPO需要组内多个响应来计算相对优势，这里我们为每个prompt生成多个响应
         """  
         
-        # chosen_input_ids 实际上已经被添加到 batch["input_ids"] 中，这部分逻辑是正确的。
-        
         batch = {  
-            "input_ids": [],            # 选择回答的完整输入  
-            "attention_mask": [],       # 选择回答的注意力掩码  
-            "rejected_input_ids": [],   # 拒绝回答的完整输入  
-            "rejected_attention_mask": [] # 拒绝回答的注意力掩码  
+            "input_ids": [],            # 所有响应的完整输入  
+            "attention_mask": [],       # 所有响应的注意力掩码  
         }  
-        # batch = {"input_ids": [], "attention_mask": [], "response_ids": [], "group_labels": []}  
         
+        # 为每个prompt生成多个响应（chosen + rejected + 额外的生成）
         for prompt, chosen, rejected in zip(samples["prompt"], samples["chosen"], samples["rejected"]):  
-            # 处理chosen回答  
-            chosen_prompt_tokens = self.tokenizer(  
-                f"Question: {prompt}\nAnswer:",   
-                max_length=self.max_seq_length // 2,  
-                truncation=True,  
-                return_tensors="pt"  
-            )  
+            # 为GRPO生成组内多个响应
+            responses = [chosen, rejected]
             
-            chosen_response_tokens = self.tokenizer(  
-                chosen,  
-                max_length=self.max_seq_length // 2,  
-                truncation=True,  
-                return_tensors="pt"  
-            )  
+            # 可以添加更多响应生成逻辑，这里先用chosen和rejected
+            # 在实际应用中，可以调用模型生成更多响应
             
-            # 合并输入ID和attention mask (chosen)  
-            chosen_input_ids = torch.cat([  
-                chosen_prompt_tokens["input_ids"][0],   
-                chosen_response_tokens["input_ids"][0][1:]  # 去掉response的BOS token  
-            ])  
-            chosen_attention_mask = torch.cat([  
-                chosen_prompt_tokens["attention_mask"][0],   
-                chosen_response_tokens["attention_mask"][0][1:]  
-            ])  
-            
-            # 裁剪到最大长度  
-            if len(chosen_input_ids) > self.max_seq_length:  
-                chosen_input_ids = chosen_input_ids[:self.max_seq_length]  
-                chosen_attention_mask = chosen_attention_mask[:self.max_seq_length]  
-            
-            # 处理rejected回答  
-            rejected_prompt_tokens = self.tokenizer(  
-                f"Question: {prompt}\nAnswer:",   
-                max_length=self.max_seq_length // 2,  
-                truncation=True,  
-                return_tensors="pt"  
-            )  
-            
-            rejected_response_tokens = self.tokenizer(  
-                rejected,  
-                max_length=self.max_seq_length // 2,  
-                truncation=True,  
-                return_tensors="pt"  
-            )  
-            
-            # 合并输入ID和attention mask (rejected)  
-            rejected_input_ids = torch.cat([  
-                rejected_prompt_tokens["input_ids"][0],   
-                rejected_response_tokens["input_ids"][0][1:]  # 去掉response的BOS token  
-            ])  
-            rejected_attention_mask = torch.cat([  
-                rejected_prompt_tokens["attention_mask"][0],   
-                rejected_response_tokens["attention_mask"][0][1:]  
-            ])  
-            
-            # 裁剪到最大长度  
-            if len(rejected_input_ids) > self.max_seq_length:  
-                rejected_input_ids = rejected_input_ids[:self.max_seq_length]  
-                rejected_attention_mask = rejected_attention_mask[:self.max_seq_length]  
-            
-            # 添加到批次  
-            batch["input_ids"].append(chosen_input_ids)  
-            batch["attention_mask"].append(chosen_attention_mask)  
-            batch["rejected_input_ids"].append(rejected_input_ids)  
-            batch["rejected_attention_mask"].append(rejected_attention_mask)  
+            for response in responses:
+                # 处理prompt
+                prompt_tokens = self.tokenizer(  
+                    f"Question: {prompt}\nAnswer:",   
+                    max_length=self.max_seq_length // 2,  
+                    truncation=True,  
+                    return_tensors="pt"  
+                )  
+                
+                # 处理response
+                response_tokens = self.tokenizer(  
+                    response,  
+                    max_length=self.max_seq_length // 2,  
+                    truncation=True,  
+                    return_tensors="pt"  
+                )  
+                
+                # 合并输入ID和attention mask
+                input_ids = torch.cat([  
+                    prompt_tokens["input_ids"][0],   
+                    response_tokens["input_ids"][0][1:]  # 去掉response的BOS token  
+                ])  
+                attention_mask = torch.cat([  
+                    prompt_tokens["attention_mask"][0],   
+                    response_tokens["attention_mask"][0][1:]  
+                ])  
+                
+                # 裁剪到最大长度  
+                if len(input_ids) > self.max_seq_length:  
+                    input_ids = input_ids[:self.max_seq_length]  
+                    attention_mask = attention_mask[:self.max_seq_length]  
+                
+                # 添加到批次  
+                batch["input_ids"].append(input_ids)  
+                batch["attention_mask"].append(attention_mask)  
         
-        # 使用PyTorch内置的pad_sequence或您已有的填充方法  
-        if hasattr(self, "_pad_sequences"):  
-            batch["input_ids"] = self._pad_sequences(batch["input_ids"], max_seq_length= self.max_seq_length)  
-            batch["attention_mask"] = self._pad_sequences(batch["attention_mask"], max_seq_length= self.max_seq_length)  
-            batch["rejected_input_ids"] = self._pad_sequences(batch["rejected_input_ids"], max_seq_length= self.max_seq_length)  
-            batch["rejected_attention_mask"] = self._pad_sequences(batch["rejected_attention_mask"], max_seq_length= self.max_seq_length)  
-        else:  
-            # 使用PyTorch内置的padding  
-            from torch.nn.utils.rnn import pad_sequence  
-            batch["input_ids"] = pad_sequence(batch["input_ids"], batch_first=True, padding_value=self.tokenizer.pad_token_id)  
-            batch["attention_mask"] = pad_sequence(batch["attention_mask"], batch_first=True, padding_value=0)  
-            batch["rejected_input_ids"] = pad_sequence(batch["rejected_input_ids"], batch_first=True, padding_value=self.tokenizer.pad_token_id)  
-            batch["rejected_attention_mask"] = pad_sequence(batch["rejected_attention_mask"], batch_first=True, padding_value=0)  
+        # 使用PyTorch内置的padding  
+        from torch.nn.utils.rnn import pad_sequence  
+        batch["input_ids"] = pad_sequence(batch["input_ids"], batch_first=True, padding_value=self.tokenizer.pad_token_id)  
+        batch["attention_mask"] = pad_sequence(batch["attention_mask"], batch_first=True, padding_value=0)  
         
         return batch  
         
@@ -628,27 +610,28 @@ class GRPOTrainerWrapper:
         # 初始化结果字典  
         batch = {}  
         
-        # 检查是否为训练数据（包含rejected_input_ids）  
-        is_train = "rejected_input_ids" in features[0]  
+        # 检查是否为训练数据（GRPO格式）  
+        is_train = "input_ids" in features[0] and "attention_mask" in features[0]  
         
         if is_train:  
-            # 处理训练批次（包含chosen和rejected）  
+            # 处理训练批次（GRPO格式）  
             batch = {  
                 "input_ids": torch.stack([f["input_ids"] for f in features]),  
                 "attention_mask": torch.stack([f["attention_mask"] for f in features]),  
-                "rejected_input_ids": torch.stack([f["rejected_input_ids"] for f in features]),  
-                "rejected_attention_mask": torch.stack([f["rejected_attention_mask"] for f in features]),  
             }  
             
-            # 生成group_ids - 每个样本一个组，用于GRPO中区分不同问题的回答对  
+            # 生成group_ids - 用于GRPO中区分不同问题的回答组  
             batch_size = len(features)  
-            batch["group_ids"] = torch.arange(0, batch_size, dtype=torch.long)  
+            # 假设每2个样本组成一个组（chosen和rejected）  
+            group_ids = torch.arange(0, batch_size // 2, dtype=torch.long).repeat_interleave(2)  
+            if len(group_ids) < batch_size:  
+                # 如果最后一个组不完整，将其归入前一个组  
+                group_ids = torch.cat([group_ids, group_ids[-1:] * (batch_size - len(group_ids))])  
+            batch["group_ids"] = group_ids  
             
             # 确保张量格式正确  
             batch["input_ids"] = batch["input_ids"].to(torch.long)  
             batch["attention_mask"] = batch["attention_mask"].to(torch.long)  
-            batch["rejected_input_ids"] = batch["rejected_input_ids"].to(torch.long)  
-            batch["rejected_attention_mask"] = batch["rejected_attention_mask"].to(torch.long)  
             
         else:  
             # 处理评估批次  

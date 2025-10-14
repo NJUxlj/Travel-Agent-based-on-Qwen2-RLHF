@@ -4,13 +4,15 @@
 - 如果各位运行项目出现问题无法解决的话，可以直接给我提issue，我会抽空fix的。
 - 最好附上报错截图。
 
+#### 2025.10.15
+- 近半年一直在公司里做大模型项目，没能抽出时间修复各位提出的问题，如造成不便，深感抱歉 ～～～
 
 
 ### 项目的组成部分
 - 本项目希望借助轻量级大模型`Qwen2.5-0.5B~3B`帮助用户在本地更好地规划旅行路径，提高旅行体验。本项目是基于Qwen2.5+SFT微调+RLHF+RAG的旅游路径规划智能体。
 
 - 项目的整体框架如下：
-
+```bash
 - Qwen2模型本体
 
 - SFT + RLHF 系统
@@ -19,11 +21,13 @@
     - DPOTrainer
     - GRPOTrainer
 - RAG系统
-    - RAG
-    - Self-RAG
-    - MemWalker-RAG
-- 简易的 multi-agent 系统
+    - RAG 调度器
+        - naive RAG
+        - Self-RAG
+        - MemWalker-RAG
+- multi-agent 系统
 
+```
 
 
 ### RAG系统
@@ -270,7 +274,7 @@ src:
      - ppo_trainer.py
      - grpo_trainer.py
      - multi_task_trainer.py
-     - init.py
+     - __init__.py
     pretrain:
      - pretrain.py
      - init.py

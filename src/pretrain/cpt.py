@@ -1,5 +1,4 @@
-# 分别在 MCQ, QA, Text-to-Text数据集上进行微调
-
+# 导入一些必要的包
 import sys
 import os
 import json
@@ -9,7 +8,9 @@ from typing import List, Any, Dict
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 
 
-
-class MultiTaskTrainer:
+class CPTTrainer:
+    '''
+    用来在大量的文本上做继续预训练
+    '''
     def __init__(self):
         pass
