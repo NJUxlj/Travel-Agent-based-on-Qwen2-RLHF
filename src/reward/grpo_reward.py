@@ -49,3 +49,21 @@ class GRPOReward:
             rewards.append(reward)
         print(f"The rewards for the sentence similarity reward are: {rewards}")
         return rewards
+
+
+    
+
+    def gpt_verifier_reward():
+        pass
+
+
+    def bleu_rougel_reward():
+        pass
+
+
+    def mcts_rag_reward():
+        '''
+        结合蒙特卡洛树搜索和 RAG 的奖励函数
+
+        在 RAG 召回的片段中进行 MCTS， 找到奖励最高的那个片段组合，然后喂给 gpt
+        '''

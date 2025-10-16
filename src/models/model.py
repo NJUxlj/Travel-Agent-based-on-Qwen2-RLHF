@@ -75,7 +75,10 @@ class TravelAgent:
         
         
         if self.use_api:
-            pass
+            # API 模式下不加载模型，避免内存问题
+            self.model = None
+            self.tokenizer = None
+            print("使用 API 模式，跳过本地模型加载")
         
         else:
         
@@ -182,6 +185,10 @@ class TravelAgent:
         Returns:
             str: 生成的响应文本
         """
+        if self.use_api:
+            # 使用 API 调用
+            return self.call_api_model(prompt)
+        
         # 编码输入
         inputs = self.tokenizer(prompt, return_tensors="pt", padding=True)
         inputs = {k: v.to(self.device) for k, v in inputs.items()}

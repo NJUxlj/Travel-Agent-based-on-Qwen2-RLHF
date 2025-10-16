@@ -1,4 +1,11 @@
 import gradio as gr  
+from pathlib import Path
+import os, sys
+
+# 添加项目根目录到 Python 路径
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
 from src.agents.agent import RAG  
 from src.agents.tools import ToolDispatcher  
 from src.models.model import TravelAgent  
@@ -8,7 +15,7 @@ import pandas as pd
 import matplotlib.pyplot as plt  
 from typing import Dict 
 
-from src.finetune.sft_trainer import SFTTrainer
+# from src.finetune.sft_trainer import SFTTrainer
 
 
 
@@ -49,7 +56,7 @@ class TrainingMonitor:
 
 # 初始化RAG系统  
 def initialize_rag():  
-    agent = TravelAgent(model_name=SFT_MODEL_PATH)  
+    agent = TravelAgent(model_name=SFT_MODEL_PATH, use_api=True)  
     rag = RAG(  
         agent=agent,  
         dataset_name_or_path=RAG_DATA_PATH,  
