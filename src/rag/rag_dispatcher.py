@@ -1,17 +1,16 @@
-from src.agents.mem_walker import MemoryTreeNode
-from src.agents.mem_walker import MemoryTreeBuilder
-
-from src.agents.mem_walker import ChatPDFForMemWalker
-
-from src.agents.mem_walker import Navigator
-
-from src.agents.self_rag import SelfRAG
-
-
+from pathlib import Path
+import os, sys
+sys.path.append(Path(__file__).parent)
+from mem_walker import MemoryTreeNode
+from mem_walker import MemoryTreeBuilder
+from mem_walker import ChatPDFForMemWalker
+from mem_walker import Navigator
+from self_rag import SelfRAG
+from rag_config import RAGType
 from typing import Literal, Callable, Dict, Tuple
 
 
-from src.configs.config import PDF_FOLDER_PATH
+from configs.config import PDF_FOLDER_PATH
 
 import asyncio
 
@@ -27,15 +26,15 @@ class RAGDispatcher():
         # 2. 规划路径执行
         # 3. 规划路径总结
         
-        if self.rag_type == "mem_walker":
+        if self.rag_type == RAGType.MEM_WALKER:
             return await self.mem_walker(query)
         
-        elif self.rag_type == "rag":
+        elif self.rag_type == RAGType.RAG:
             return self.rag(query)
 
-        elif self.rag_type == "self_rag":
+        elif self.rag_type == RAGType.SELF_RAG:
             return await self.self_rag(query)
-        elif self.rag_type == "corrective_rag":
+        elif self.rag_type == RAGType.CORRECTIVE_RAG:
             return self.corrective_rag(query)
         
     def rag(self, query:str):

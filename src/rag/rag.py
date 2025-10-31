@@ -2,15 +2,17 @@
 
 
 try:
-
-    from src.agents.prompt_template import MyPromptTemplate
-    from src.agents.tools import ToolDispatcher
+    from pathlib import Path
+    import os, sys
+    sys.path.append(Path(__file__).parent.parent)
+    from agents.prompt_template import MyPromptTemplate
+    from agents.tools import ToolDispatcher
     from typing import Dict, List, Optional, Tuple
-    from src.models.model import TravelAgent
-    from src.data.data_processor import CrossWOZProcessor
+    from models.model import TravelAgent
+    from data.data_processor import CrossWOZProcessor
 
 except Exception as e:
-    print("导包出现问题：",str(e))
+    print("rag: 导包出现问题：",str(e))
     print("================================")
     
     

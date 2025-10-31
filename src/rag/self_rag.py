@@ -23,12 +23,15 @@ from langchain.vectorstores.utils import filter_complex_metadata
 from langchain_core.runnables import RunnableLambda, RunnableParallel  
  
 from zhipuai import ZhipuAI  
-import os  
+import os, sys 
 
 from transformers import AutoModelForSeq2SeqLM, AutoModelForCausalLM, AutoTokenizer, pipeline
 
-from src.configs.config import MODEL_PATH,EMBEDDING_MODEL_PATH_BPE, SFT_MODEL_PATH, EMBEDDING_MODEL_PATH, PDF_FOLDER_PATH
-from src.agents.chat_pdf import ChatPDF
+
+from pathlib import Path
+sys.path.append(Path(__file__).parent.parent)
+from configs.config import MODEL_PATH,EMBEDDING_MODEL_PATH_BPE, SFT_MODEL_PATH, EMBEDDING_MODEL_PATH, PDF_FOLDER_PATH
+from agents.chat_pdf import ChatPDF
 
 import asyncio
 

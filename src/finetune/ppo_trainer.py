@@ -9,19 +9,17 @@ from transformers import (
     TrainerCallback,  
     AutoModelForSequenceClassification,
     DebertaV2Model,
-    
     DebertaV2Config
 )  
 
 from datasets import DatasetDict
-
-
 from tqdm import tqdm
+from pathlib import Path
+import os, sys
+sys.path.append(Path(__file__).parent.parent)
+from models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
 
-
-from src.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
-
-from src.configs.config import (
+from configs.config import (
     REWARD_MODEL_PATH, 
     MODEL_PATH, 
     SFT_MODEL_PATH, 
@@ -35,6 +33,7 @@ from src.configs.config import (
 from peft import LoraConfig, get_peft_model  
 import os  
 import numpy as np  
+import copy
 from datasets import load_dataset, load_from_disk  
 
 class PPODataset(Dataset):  
@@ -66,20 +65,20 @@ class Critic(nn.Module):
     '''
     def __init__(self, base_model):
         super().__init__()
-        self.base_model = base_model  # 可以看做一个 encoder
-        self.base_model.eval()  # 冻结骨干部分
+        # 创建base_model的副本而不是直接使用原模型，避免共享参数
+        self.base_model = copy.deepcopy(base_model)
+        # 不冻结骨干部分，让critic可以正常学习
         self.value_head = nn.Linear(base_model.config.hidden_size, 1)
         
     def forward(
             self, 
             input_ids = None, 
             inputs_embeds = None,
-            attention_mask = None, 
-            num_actions=None
+            attention_mask = None,
+            past_key_values = None,
+            use_cache = False
             ):
         '''
-        num_actions: 模型新推理了多少token
-        
         return values: shape = (batch_size, seq_len)
         '''
         
@@ -89,20 +88,20 @@ class Critic(nn.Module):
         if input_ids is not None:
             hidden_states = self.base_model.forward(
                 input_ids = input_ids,
-                attention_mask = attention_mask
+                attention_mask = attention_mask,
+                past_key_values = past_key_values,
+                use_cache = use_cache
             ).last_hidden_state  # shape = (batch_size, seq_len, hidden_size)
         else:
             hidden_states = self.base_model.forward(
                 inputs_embeds = inputs_embeds,
-                attention_mask = attention_mask
+                attention_mask = attention_mask,
+                past_key_values = past_key_values,
+                use_cache = use_cache
             ).last_hidden_state
         
-        value_model_output = self.value_head.forward(hidden_states)  # shape = (batch_size, seq_len, 1)
-        
-        # values = value_model_output.squeeze(-1)[:, -num_actions:] # 只取策略做出的actions（response）的部分
-        
-        values = value_model_output.squeeze(-1) # 只取策略做出的actions（response）的部分
-        
+        value_model_output = self.value_head(hidden_states)  # shape = (batch_size, seq_len, 1)
+        values = value_model_output.squeeze(-1)  # shape = (batch_size, seq_len)
         
         return values
     
@@ -120,15 +119,23 @@ class PPOTrainer:
         cached_data_path:str = CACHED_PPO_DATA_PATH,
         model_name: str = MODEL_PATH,  # 基础模型名称
         reward_model_name:str = REWARD_MODEL_PATH,
+        reference_model_name: str = SFT_MODEL_PATH,  # 参考模型应该使用SFT模型
         clip_epsilon: float = 0.2,     # PPO裁剪参数，限制策略更新幅度
         gamma: float = 0.99,           # 折扣因子，控制未来奖励的重要性  
         gae_lambda: float = 0.95,      # GAE λ参数，平衡偏差和方差 
         ppo_epochs: int = 3,            # 每批数据的PPO更新次数 
-        lr: float = 3e-5,              # 学习率 
+        lr_actor: float = 5e-5,         # Actor学习率
+        lr_critic: float = 5e-5,        # Critic学习率
         max_seq_length: int = 1024,  
         is_peft: bool = True,  
-        peft_config: LoraConfig = None  
+        peft_config: LoraConfig = None,
+        kl_coef: float = 0.1,          # KL散度系数
+        vf_coef: float = 0.5,          # 价值损失系数
+        entropy_coef: float = 0.01     # 熵奖励系数
     ):  
+        # 导入copy模块
+        import copy
+        
         self.output_dir = output_dir  
         
         self.dataset_path = dataset_path
@@ -138,7 +145,10 @@ class PPOTrainer:
         self.clip_epsilon = clip_epsilon  
         self.gamma = gamma  
         self.gae_lambda = gae_lambda  
-        self.ppo_epochs = ppo_epochs  
+        self.ppo_epochs = ppo_epochs
+        self.kl_coef = kl_coef
+        self.vf_coef = vf_coef
+        self.entropy_coef = entropy_coef
 
         # 初始化模型和tokenizer  
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)  
@@ -153,24 +163,29 @@ class PPOTrainer:
             trust_remote_code=True  
         )  
         
-        self.device  =self.model.device
+        self.device  = self.model.device
         
         # 创建参考策略模型 - 用于KL散度计算，防止策略偏离太远  
-        # 类似于RLHF中的SFT模型，作为行为基准  
+        # 应该使用SFT模型作为参考模型，而不是与当前模型相同
         self.ref_model = Qwen2ForCausalLM.from_pretrained(  
-            model_name,  
-            # device_map="auto",  
+            reference_model_name if reference_model_name else model_name,  
+            device_map="auto",
             trust_remote_code=True  
         ).to(self.device)
+        # 固定参考模型参数
+        for param in self.ref_model.parameters():
+            param.requires_grad = False
 
             
             
             
-        # 创建奖励模型    
+        # 创建奖励模型并设置为评估模式
         self.reward_model = AutoModelForSequenceClassification.from_pretrained(
             reward_model_name,
             trust_remote_code=True
         ).to(self.device)
+        # 设置为评估模式，因为我们只使用它来计算奖励而不训练它
+        self.reward_model.eval()
         
         
         # 创建价值头网络（Critic）- 用于预测状态值函数V(s)  
@@ -200,9 +215,17 @@ class PPOTrainer:
         #     weight_decay=0.01   # 权重衰减，防止过拟合  
         # )  
         
-        # 【方案2， 分别为 actor和critic创建优化器】
-        self.optimizer_actor = torch.optim.Adam(self.model.parameters(), lr=0.00005)
-        self.optimizer_critic = torch.optim.Adam(self.critic_model.parameters(), lr=0.00005)
+        # 为actor和critic分别创建优化器
+        self.optimizer_actor = torch.optim.AdamW(
+            self.model.parameters(), 
+            lr=lr_actor,
+            weight_decay=0.01
+        )
+        self.optimizer_critic = torch.optim.AdamW(
+            self.critic_model.parameters(), 
+            lr=lr_critic,
+            weight_decay=0.01
+        )
         
 
     def _default_lora_config(self):  
@@ -218,16 +241,18 @@ class PPOTrainer:
         
     def _load_cached_dataset(self, dataset_path=CACHED_PPO_DATA_PATH):
         if not os.path.exists(dataset_path):
-            os.makedirs(CACHED_PPO_DATA_PATH, exist_ok=True)
+            os.makedirs(dataset_path, exist_ok=True)
         try:
             tokenized_data = load_from_disk(dataset_path)
-            print("从缓存加载DPO数据集成功~~~")
-            # tokenized_data.set_format(type="torch")
+            print("从缓存加载PPO数据集成功")
             train_data = tokenized_data['train']
             eval_data = tokenized_data['validation']
+            # 确保数据格式正确
+            train_data.set_format(type="torch")
+            eval_data.set_format(type="torch")
             return PPODataset(train_data), PPODataset(eval_data)
         except Exception as e:
-            print(f"加载缓存的DPO数据集（tokenized）失败: {e}, 将重新预处理数据")
+            print(f"加载缓存的PPO数据集失败: {e}, 将重新预处理数据")
             ppo_train_data, ppo_eval_data = self._prepare_dataset(self.dataset_path, self.max_seq_length)
             return ppo_train_data, ppo_eval_data
 
@@ -317,119 +342,170 @@ class PPOTrainer:
         
         return PPODataset(train_data), PPODataset(val_data)
 
-    def ppo_collator(self, features):  
-        return {  
-            "input_ids": torch.stack([f["input_ids"] for f in features]),  
-            "attention_mask": torch.stack([f["attention_mask"] for f in features]),  
-            "response_ids": torch.stack([f["response_ids"] for f in features]),  
-            "old_log_probs": torch.stack([f["old_log_probs"] for f in features])  
-        }  
+    def ppo_collator(self, batch):
+        """自定义数据整理函数，用于处理PPO训练的数据批次"""
+        input_ids = [item["input_ids"] for item in batch]
+        attention_mask = [item["attention_mask"] for item in batch]
+        response_ids = [item["response_ids"] for item in batch]
+        old_log_probs = [item["old_log_probs"] for item in batch]
         
-    def compute_rewards(self, model_outputs, response_ids, attention_mask, kl_coef=0.1):  
+        # 获取批次中的最大长度
+        max_len = min(max(len(ids) for ids in input_ids), self.max_seq_length)
+        
+        # 对输入进行填充，确保所有序列具有相同长度
+        padded_input_ids = torch.zeros((len(batch), max_len), dtype=torch.long)
+        padded_attention_mask = torch.zeros((len(batch), max_len), dtype=torch.long)
+        padded_response_ids = torch.zeros((len(batch), max_len), dtype=torch.long)
+        padded_old_log_probs = torch.zeros((len(batch), max_len), dtype=torch.float)
+        
+        for i in range(len(batch)):
+            seq_len = min(len(input_ids[i]), max_len)
+            padded_input_ids[i, :seq_len] = torch.tensor(input_ids[i][:seq_len])
+            padded_attention_mask[i, :seq_len] = torch.tensor(attention_mask[i][:seq_len])
+            padded_response_ids[i, :seq_len] = torch.tensor(response_ids[i][:seq_len])
+            
+            # 处理old_log_probs，确保维度匹配
+            log_prob_len = len(old_log_probs[i])
+            if log_prob_len > 0:
+                log_prob_seq_len = min(log_prob_len, seq_len)
+                padded_old_log_probs[i, :log_prob_seq_len] = torch.tensor(old_log_probs[i][:log_prob_seq_len], dtype=torch.float)
+        
+        return {
+            "input_ids": padded_input_ids,
+            "attention_mask": padded_attention_mask,
+            "response_ids": padded_response_ids,
+            "old_log_probs": padded_old_log_probs,
+        }
+        
+    def compute_rewards(self, model_outputs, response_ids, attention_mask, input_ids):  
         """计算奖励，包括外部奖励和KL惩罚
         
-        ###Args
-        
-        
-        
-        
-        ###Return
-        
-        
-        ### 简介
-            这里示例使用简单奖励函数（可以替换为实际奖励函数）
-            例如，使用生成文本的长度作为正向奖励  
-        
-        """  
-        
-        # 转换成文本
-        response_text = self.tokenizer.batch_decode(response_ids, skip_special_tokens = True)
-        
-        reward_model_inputs  =  self.reward_tokenizer(response_text, return_tensors="pt", padding=True)
-        
-        reward_model_inputs = {k: v.to(self.reward_model.device) for k, v in reward_model_inputs.items()}
-        # 使用reward model计算外部奖励
-        with torch.no_grad():
+        Args:
+            model_outputs: 模型输出
+            response_ids: 生成的响应ID
+            attention_mask: 注意力掩码
+            input_ids: 输入ID，用于区分prompt和response部分
             
-            # print("reward_model_inputs['input_ids'].shape = ", reward_model_inputs['input_ids'].shape)
-            # print("deberta_v2.config.max_length = ", DebertaV2Config().max_position_embeddings)
-            
-            reward_outputs = self.reward_model.forward(
-                input_ids=reward_model_inputs['input_ids'],
-                attention_mask=reward_model_inputs['attention_mask']
-            )  # reward_outputs.logits.shape = (bsz, 1)
-            external_rewards = reward_outputs.logits.squeeze(-1)  # 奖励模型只是对整个序列做出打分
+        Returns:
+            rewards: 每个token位置的奖励 (bsz, seq_len)
+            new_log_probs: 新策略的log概率 (bsz, seq_len)
+            kl: KL散度 (bsz, seq_len)
+        """
+        # 提取prompt部分和response部分的边界
+        batch_size, seq_len = response_ids.shape
         
         # 计算KL散度惩罚
-        logits = model_outputs.logits  
-        log_probs = F.log_softmax(logits, dim=-1)  
-        new_log_probs = torch.gather(  
-            log_probs, -1, response_ids.unsqueeze(-1)  
-        ).squeeze(-1)  
+        logits = model_outputs.logits   # # 获取当前策略模型的logits输出，形状为(batch_size, seq_len, vocab_size)
+        log_probs = F.log_softmax(logits, dim=-1)   # 对logits应用log_softmax得到标准化的log概率分布
+        new_log_probs = torch.gather(     # 从概率分布中提取实际生成token对应的log概率
+            log_probs, -1, response_ids.unsqueeze(-1)   # response_ids是模型实际生成的token序列 
+        ).squeeze(-1)    # 压缩维度，最终得到形状为(batch_size, seq_len)的log概率矩阵
         
         # 计算参考模型的概率（用于KL散度）  
         with torch.no_grad():  
-            ref_outputs = self.ref_model(  
-                input_ids=response_ids,  
+            ref_outputs = self.ref_model(    # 使用参考模型（通常是SFT模型）进行前向推理
+                input_ids=input_ids,  
                 attention_mask=attention_mask  
-            )  
+            ) 
             ref_logits = ref_outputs.logits  
             ref_log_probs = F.log_softmax(ref_logits, dim=-1)  
-            ref_log_probs = torch.gather(  
+            ref_log_probs = torch.gather(    # 提取相同生成token在参考模型中的log概率
                 ref_log_probs, -1, response_ids.unsqueeze(-1)  
-            ).squeeze(-1)  
+            ).squeeze(-1)   # 压缩维度，形状为(batch_size, seq_len)
             
         # 计算KL散度  
         kl = (new_log_probs - ref_log_probs) * attention_mask  # shape = (bsz, seq_len)
         
-        # 生成简单奖励（例如基于令牌数量），这里仅作为示例  
-        # 实际使用中应该替换为自定义奖励函数  
-        # base_rewards = torch.sum(attention_mask, dim=-1).float() * 0.1  
+        # 初始化奖励矩阵
+        rewards = torch.zeros_like(new_log_probs)  
         
-        # 组合奖励
-        # rewards = external_rewards - kl_coef * torch.sum(kl, dim=-1)  # shape = (bsz, )
-        rewards =  - kl_coef * kl
-        rewards[:, -1] += external_rewards
+        # 使用reward model计算外部奖励
+        # 首先确定response部分（假设prompt以特定token或格式结束）
+        # 这里简单处理：找到第一个非padding token作为response开始
+        response_text = self.tokenizer.batch_decode(response_ids, skip_special_tokens=True)
         
+        reward_model_inputs = self.reward_tokenizer(response_text, return_tensors="pt", padding=True, truncation=True, max_length=512)
+        reward_model_inputs = {k: v.to(self.reward_model.device) for k, v in reward_model_inputs.items()}
+        
+        with torch.no_grad():
+            reward_outputs = self.reward_model(**reward_model_inputs)
+            external_rewards = reward_outputs.logits.squeeze(-1)  # shape = (bsz,)
+        
+        # 组合奖励：KL惩罚应用于所有token，外部奖励只应用于response的最后一个token
+        # 1. 应用KL惩罚
+        rewards = -self.kl_coef * kl
+        
+        # 2. 找到每个序列的最后一个非padding token位置
+        for i in range(batch_size):
+            # 找到最后一个为1的位置
+            last_valid_idx = torch.where(attention_mask[i] == 1)[0][-1] if torch.sum(attention_mask[i]) > 0 else seq_len - 1
+            rewards[i, last_valid_idx] += external_rewards[i]
         
         return rewards, new_log_probs, kl  
         
     def compute_gae(self, rewards, values, masks, gamma=0.99, lam=0.95):  
         """计算广义优势估计(GAE)
         
-        rewards.shape = (bsz, )
-        
-        values.shape = (bsz, seq_len)
-        
-        mask
-        
-        
+        Args:
+            rewards: 奖励 (bsz, seq_len)
+            values: 价值估计 (bsz, seq_len)
+            masks: 掩码 (bsz, seq_len)
+            gamma: 折扣因子
+            lam: GAE lambda参数
+            
+        Returns:
+            advantages: 优势估计 (bsz, seq_len)
+            returns: 回报 (bsz, seq_len)
         """  
+        batch_size, seq_len = rewards.shape
         advantages = torch.zeros_like(rewards)  
+        
+        # 计算最后一个时间步的优势
         last_gae_lam = 0   # A_{T+1}==0
         
         # 反向遍历序列以计算GAE  
-        for t in reversed(range(len(rewards))):  
-            if t == len(rewards) - 1:  
-                next_value = 0  
+        for t in reversed(range(seq_len)):  
+            if t == seq_len - 1:  
+                next_value = 0   # V(S_{t+1}) = 0
             else:  
-                next_value = values[t + 1]  
+                next_value = values[:, t + 1]  
                 
-            delta = rewards[t] + gamma * next_value * masks[t] - values[t]  
-            last_gae_lam = delta + gamma * lam * masks[t] * last_gae_lam  
-            advantages[t] = last_gae_lam  
-            
+            # 计算TD误差
+            delta = rewards[:, t] + gamma * next_value * masks[:, t] - values[:, t]  
+
+            '''
+            masks[:, t] （第t个时间步的掩码）有两个重要作用：
+
+            1. 在TD误差计算中 
+                - 这里 masks[:, t] 用于确保只有有效token（非padding）的未来价值被考虑。
+                - 对于padding token， masks[:, t]=0 ，这样就会将 gamma * next_value * masks[:, t] 项置零，只保留当前奖励减去当前价值估计。
+
+            2. 在递归计算GAE时 ：
+                - last_gae_lam = delta + gamma * lam * masks[:, t] * last_gae_lam
+                - 等价于 A(S_t) = delta + gamma * lam * mask[:, t] * A(S_{t+1})
+                这里 masks[:, t] 用于控制是否将后续时间步的优势估计回传。对于padding token，后续时间步的优势不应影响当前步，因此将其置零。
+
+            '''
+            # 递归计算GAE
+            last_gae_lam = delta + gamma * lam * masks[:, t] * last_gae_lam  
+            advantages[:, t] = last_gae_lam  
+        
         # 计算回报（returns = advantages + values）  
         returns = advantages + values  
         
-        # 标准化优势  
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)  
+        # 标准化优势 - 对每个样本单独标准化
+        for i in range(batch_size):
+            valid_advantages = advantages[i][masks[i] > 0]
+            if len(valid_advantages) > 0:
+                mean = valid_advantages.mean()
+                std = valid_advantages.std() + 1e-8
+                advantages[i][masks[i] > 0] = (valid_advantages - mean) / std
         
         return advantages, returns  
 
     def compute_loss(self, actor_model:Qwen2ForCausalLM, critic_model:Critic, inputs):  
         # 前向传播获取logits  
-        outputs = actor_model.forward(  
+        outputs = actor_model(  
             input_ids=inputs["input_ids"],  
             attention_mask=inputs["attention_mask"] ,
             output_hidden_states=True
@@ -439,16 +515,15 @@ class PPOTrainer:
         rewards, new_log_probs, kl = self.compute_rewards(  
             outputs,   
             inputs["response_ids"],  
-            inputs["attention_mask"]  
+            inputs["attention_mask"],
+            inputs["input_ids"]  # 传递input_ids以帮助区分prompt和response
         )  
         
-        # rewards.shape = (bsz, )
-        
-        # 获取隐藏状态用于价值估计  
-        # hidden_states = outputs.hidden_states[-1]  # 获取最后一层的隐藏状态  
-        
-        # 使用价值头计算每个token的价值  
-        values = critic_model.forward(input_ids = inputs["input_ids"], attention_mask=inputs["attention_mask"])   # shape = (bsz, seq_len)
+        # 使用critic模型计算每个token的价值  
+        values = critic_model(  
+            input_ids=inputs["input_ids"], 
+            attention_mask=inputs["attention_mask"]  
+        )  # shape = (bsz, seq_len)
         
         # 计算蒙版（用于忽略padding）  
         masks = inputs["attention_mask"]  
@@ -459,39 +534,36 @@ class PPOTrainer:
             gamma=self.gamma, lam=self.gae_lambda  
         )  
         
-        # 计算新策略概率  
-        log_probs = F.log_softmax(outputs.logits, dim=-1)  
-        new_log_probs = torch.gather(  
-            log_probs, -1, inputs["response_ids"].unsqueeze(-1)  
-        ).squeeze(-1)  
-        
         # 计算概率比率  
         ratio = torch.exp(new_log_probs - inputs["old_log_probs"])  
         
         # 计算策略损失 (clipped PPO objective)  
-        policy_loss = -torch.min(  
-            ratio * advantages,  
-            torch.clamp(ratio, 1-self.clip_epsilon, 1+self.clip_epsilon) * advantages  
-        ).mean()  
+        # 只考虑有效的token位置（使用mask）
+        surr1 = ratio * advantages
+        surr2 = torch.clamp(ratio, 1-self.clip_epsilon, 1+self.clip_epsilon) * advantages
+        policy_loss = -torch.min(surr1, surr2) * masks  # 应用mask
+        policy_loss = policy_loss.sum() / masks.sum()  # 按有效token数量归一化
         
         # 计算价值函数损失  
-        value_loss = F.mse_loss(values, returns)  
+        value_loss = F.mse_loss(values * masks, returns * masks, reduction='sum') / masks.sum()
         
         # 计算熵奖励（增加探索性）  
-        entropy = -torch.sum(torch.exp(log_probs) * log_probs, dim=-1).mean()  
+        logits = outputs.logits
+        entropy = -torch.sum(F.softmax(logits, dim=-1) * F.log_softmax(logits, dim=-1), dim=-1)
+        entropy = (entropy * masks).sum() / masks.sum()  # 按有效token数量归一化
         
         # 总损失  
-        total_loss = policy_loss + 0.5 * value_loss - 0.01 * entropy  
+        total_loss = policy_loss + self.vf_coef * value_loss - self.entropy_coef * entropy  
         
         return total_loss  
 
     def train(self):  
-        """自定义训练循环"""  
+        """自定义训练循环"""
         train_args = TrainingArguments(  
             output_dir=self.output_dir,  
             per_device_train_batch_size=2,  
             gradient_accumulation_steps=2,  
-            learning_rate=3e-5,  
+            learning_rate=5e-5,  
             logging_steps=10,  
             save_steps=500,  
             remove_unused_columns=False,  
@@ -521,39 +593,39 @@ class PPOTrainer:
         
         # PPO多轮优化  
         for epoch in range(self.ppo_epochs):
-            progress_bar = tqdm(train_dataloader, desc=f"PPO Epoch {epoch}")
+            self.model.train()
+            self.critic_model.train()
             
-            for batch in progress_bar:
+            progress_bar = tqdm(train_dataloader, desc=f"PPO Epoch {epoch+1}/{self.ppo_epochs}")
+            
+            for step, batch in enumerate(progress_bar):
                 
                 batch = {k: v.to(self.model.device) for k, v in batch.items()}
+                
+                # 梯度清零
                 self.optimizer_actor.zero_grad()
-                
                 self.optimizer_critic.zero_grad()
-                
-                # 前向传播
-                outputs = self.model(
-                    input_ids=batch["input_ids"],
-                    attention_mask=batch["attention_mask"],
-                    output_hidden_states=True  # 需要获取隐藏状态用于价值估计
-                )
                 
                 # 计算损失
                 loss = self.compute_loss(self.model, self.critic_model, batch)
                 
                 # 反向传播
                 loss.backward()
+                
+                # 梯度裁剪
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), train_args.max_grad_norm)
                 torch.nn.utils.clip_grad_norm_(self.critic_model.parameters(), train_args.max_grad_norm)
                 
+                # 参数更新
                 self.optimizer_actor.step()
                 self.optimizer_critic.step()
                 
                 # 更新进度条
                 progress_bar.set_postfix(loss=loss.item())
-            
-            
-            # 将更新后的策略模型参数复制给参考模型
-            self.ref_model.load_state_dict(self.model.state_dict(), strict=False)
+                
+                # 记录日志
+                if (step + 1) % train_args.logging_steps == 0:
+                    print(f"Epoch {epoch+1}, Step {step+1}: Loss = {loss.item():.4f}")
             
             eval_loss = self.evaluate()
             
@@ -581,7 +653,7 @@ class PPOTrainer:
         )
         
         total_loss = 0
-        total_samples = 0
+        total_valid_tokens = 0
         
         with torch.no_grad():
             for batch in tqdm(eval_dataloader, desc="Evaluating"):
@@ -590,20 +662,42 @@ class PPOTrainer:
                 # 计算损失
                 loss = self.compute_loss(self.model, self.critic_model, batch)
                 
-                total_loss += loss.item() * len(batch["input_ids"])
-                total_samples += len(batch["input_ids"])
+                # 统计有效token数量
+                valid_tokens = batch["attention_mask"].sum().item()
+                total_loss += loss.item() * valid_tokens
+                total_valid_tokens += valid_tokens
         
-        avg_loss = total_loss / total_samples
+        avg_loss = total_loss / total_valid_tokens if total_valid_tokens > 0 else 0
         print(f"\nEvaluation - Average Loss: {avg_loss:.4f}")
         
-        self.model.train()
-        self.critic_model.train()
         return avg_loss
             
-    def save_model(self):  
-        # save_path = os.path.join(self.output_dir, "qwen2_ppo")  
-        self.model.save_pretrained(self.output_dir)  
-        # self.tokenizer.save_pretrained(save_path)  
+    def save_model(self):
+        """保存训练好的模型"""
+        # 确保输出目录存在
+        os.makedirs(self.output_dir, exist_ok=True)
+        
+        # 保存策略模型（主要模型）
+        self.model.save_pretrained(self.output_dir)
+        self.tokenizer.save_pretrained(self.output_dir)
+        
+        # 保存价值头模型（Critic）
+        critic_output_dir = os.path.join(self.output_dir, "critic")
+        os.makedirs(critic_output_dir, exist_ok=True)
+        torch.save(self.critic_model.state_dict(), os.path.join(critic_output_dir, "critic_model.bin"))
+        
+        # 保存训练配置
+        config = {
+            "clip_epsilon": self.clip_epsilon,
+            "gamma": self.gamma,
+            "gae_lambda": self.gae_lambda,
+            "kl_coef": self.kl_coef,
+            "vf_coef": self.vf_coef,
+            "entropy_coef": self.entropy_coef
+        }
+        torch.save(config, os.path.join(self.output_dir, "training_config.pt"))
+        
+        print(f"模型已保存至 {self.output_dir}")
         
         
         

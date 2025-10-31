@@ -1,5 +1,6 @@
 import yaml  
 from pathlib import Path  
+from dataclasses import dataclass, field, fields, asdict
 import os
 
 def load_config(config_path: str) -> dict:  
@@ -47,6 +48,9 @@ GRPO_MODEL_NAME = "qwen2_grpo"
 GRPO_MODEL_PATH = os.path.join(OUTPUT_DIR, GRPO_MODEL_NAME)
 
 
+TRPO_MODEL_NAME = "qwen2_trpo"
+TRPO_MODEL_PATH = os.path.join(OUTPUT_DIR, TRPO_MODEL_NAME)
+
 
 SFT_DPO_MODEL_NAME = "qwen2_sft_dpo"
 SFT_DPO_MODEL_PATH = os.path.join(OUTPUT_DIR, SFT_DPO_MODEL_NAME)
@@ -68,18 +72,68 @@ DEEPSPEED_CONFIG_PATH = "src/configs/ds_config.json"
 PDF_FOLDER_PATH = "src/agents/travel_knowledge/tour_pdfs"
 PAGE_FOLDER_PATH = "src/agents/travel_knowledge/tour_pages"
 
-# # 在代码中使用配置  
-# model = TravelAgent(  
-#     model_name=model_config['model']['name'],  
-#     lora_config=model_config['lora']  
-# )  
 
-# trainer = Trainer(  
-#     model=model,  
-#     args=TrainingArguments(**train_config['training'])  
-# )  
 
-# dpo_trainer = TravelAgentDPOTrainer(  
-#     model=model,  
-#     config=DPOConfig(**dpo_config['dpo']['training'])  
-# )  
+
+@dataclass
+class ModelConfig:
+    pass
+
+
+
+@dataclass
+class EmbeddingConfig:
+    pass
+
+
+
+@dataclass
+class RewardModelConfig:
+    pass
+
+
+
+@dataclass
+class TrainingConfig:
+    pass
+
+
+
+
+@dataclass
+class SFTConfig:
+    pass
+
+
+
+
+@dataclass
+class PPOConfig:
+    pass
+
+
+@dataclass
+class DPOConfig:
+    pass
+
+
+
+
+@dataclass 
+class GRPOConfig:
+    pass
+
+
+
+
+
+@dataclass
+class KBConfig:
+    '''
+    知识库配置
+    '''
+
+
+
+
+
