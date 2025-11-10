@@ -21,6 +21,9 @@ from transformers import (
     DataCollatorForLanguageModeling
 )
 
+# 导入配置类
+from configs.cpt_config import CPTConfig as CPTConfigClass
+
 # 尝试导入Muon优化器，如果不可用则使用AdamW作为备选
 try:
     from muon import Muon
@@ -36,47 +39,6 @@ try:
 except ImportError:
     FLASH_ATTENTION_AVAILABLE = False
     print("警告: Flash Attention不可用，将使用标准注意力机制")
-
-
-@dataclass
-class CPTConfig:
-    """继续预训练配置类"""
-    # 模型配置
-    model_name_or_path: str = "Qwen/Qwen2.5-7B"
-    max_length: int = 2048
-    trust_remote_code: bool = True
-    
-    # 训练配置
-    learning_rate: float = 5e-5
-    num_train_epochs: int = 3
-    per_device_train_batch_size: int = 4
-    per_device_eval_batch_size: int = 4
-    gradient_accumulation_steps: int = 8
-    warmup_ratio: float = 0.05
-    weight_decay: float = 0.01
-    max_grad_norm: float = 1.0
-    
-    # 优化器配置
-    optimizer_name: str = "muon"  # muon, adamw, adam
-    use_muon_optimizer: bool = True
-    
-    # 效率优化配置
-    use_flash_attention: bool = True
-    use_gradient_checkpointing: bool = True
-    use_bf16: bool = True
-    dataloader_num_workers: int = 4
-    
-    # 输出配置
-    output_dir: str = "./cpt_output"
-    logging_steps: int = 10
-    save_steps: int = 500
-    eval_steps: int = 500
-    save_total_limit: int = 3
-    
-    # 数据配置
-    dataset_name: Optional[str] = None
-    dataset_path: Optional[str] = None
-    max_samples: Optional[int] = None
 
 
 class CPTDataset(Dataset):
@@ -114,7 +76,7 @@ class CPTTrainer:
     集成了Muon优化器和多种效率优化技术
     '''
     
-    def __init__(self, config: CPTConfig):
+    def __init__(self, config: CPTConfigClass):
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.logger = self._setup_logger()
@@ -145,12 +107,14 @@ class CPTTrainer:
     
     def load_model_and_tokenizer(self):
         """加载模型和分词器"""
-        self.logger.info(f"正在加载模型: {self.config.model_name_or_path}")
+        self.logger.info(f"正在加载模型: {self.config.model.model_name_or_path}")
         
         # 加载分词器
         self.tokenizer = AutoTokenizer.from_pretrained(
-            self.config.model_name_or_path,
-            trust_remote_code=self.config.trust_remote_code
+            self.config.model.model_name_or_path,
+            trust_remote_code=self.config.model.trust_remote_code,
+            cache_dir=self.config.model.cache_dir,
+            token=self.config.model.token
         )
         
         # 设置pad_token
@@ -159,43 +123,57 @@ class CPTTrainer:
         
         # 加载模型配置
         config = AutoConfig.from_pretrained(
-            self.config.model_name_or_path,
-            trust_remote_code=self.config.trust_remote_code
+            self.config.model.model_name_or_path,
+            trust_remote_code=self.config.model.trust_remote_code,
+            cache_dir=self.config.model.cache_dir,
+            token=self.config.model.token
         )
+        
+        # 确定torch_dtype
+        if self.config.model.torch_dtype == "bfloat16":
+            torch_dtype = torch.bfloat16
+        elif self.config.model.torch_dtype == "float16":
+            torch_dtype = torch.float16
+        else:
+            torch_dtype = torch.float32
         
         # 加载模型
         self.model = AutoModelForCausalLM.from_pretrained(
-            self.config.model_name_or_path,
+            self.config.model.model_name_or_path,
             config=config,
-            torch_dtype=torch.bfloat16 if self.config.use_bf16 else torch.float16,
-            trust_remote_code=self.config.trust_remote_code,
-            device_map="auto" if torch.cuda.is_available() else None
+            torch_dtype=torch_dtype,
+            trust_remote_code=self.config.model.trust_remote_code,
+            device_map=self.config.model.device_map if torch.cuda.is_available() else None,
+            low_cpu_mem_usage=self.config.model.low_cpu_mem_usage,
+            token=self.config.model.token
         )
         
         # 启用梯度检查点以节省内存
-        if self.config.use_gradient_checkpointing:
+        if self.config.training.gradient_checkpointing:
             self.model.gradient_checkpointing_enable()
         
         self.logger.info("模型和分词器加载完成")
     
     def create_optimizer(self):
         """创建优化器"""
-        if self.config.use_muon_optimizer and MUON_AVAILABLE:
+        if self.config.training.optim == "muon" and MUON_AVAILABLE:
             self.logger.info("使用Muon优化器")
             self.optimizer = Muon(
                 self.model.parameters(),
-                lr=self.config.learning_rate,
-                weight_decay=self.config.weight_decay
+                lr=self.config.training.learning_rate,
+                weight_decay=self.config.training.weight_decay
             )
         else:
-            if self.config.use_muon_optimizer and not MUON_AVAILABLE:
+            if self.config.training.optim == "muon" and not MUON_AVAILABLE:
                 self.logger.warning("Muon优化器不可用，使用AdamW作为备选")
             
             import torch.optim as optim
             self.optimizer = optim.AdamW(
                 self.model.parameters(),
-                lr=self.config.learning_rate,
-                weight_decay=self.config.weight_decay
+                lr=self.config.training.learning_rate,
+                weight_decay=self.config.training.weight_decay,
+                betas=(self.config.training.adam_beta1, self.config.training.adam_beta2),
+                eps=self.config.training.adam_epsilon
             )
         
         self.logger.info(f"优化器创建完成: {type(self.optimizer).__name__}")
@@ -205,14 +183,14 @@ class CPTTrainer:
         self.logger.info(f"正在加载数据，共 {len(texts)} 条文本")
         
         # 如果设置了最大样本数，则截取数据
-        if self.config.max_samples and len(texts) > self.config.max_samples:
-            texts = texts[:self.config.max_samples]
+        if self.config.data.max_train_samples and len(texts) > self.config.data.max_train_samples:
+            texts = texts[:self.config.data.max_train_samples]
             self.logger.info(f"数据已截取到 {len(texts)} 条")
         
         dataset = CPTDataset(
             texts=texts,
             tokenizer=self.tokenizer,
-            max_length=self.config.max_length
+            max_length=self.config.model.max_length
         )
         
         self.logger.info(f"数据集创建完成，共 {len(dataset)} 个样本")
@@ -220,16 +198,16 @@ class CPTTrainer:
     
     def create_data_loader(self, dataset: CPTDataset, is_training: bool = True) -> DataLoader:
         """创建数据加载器"""
-        batch_size = (self.config.per_device_train_batch_size if is_training 
-                     else self.config.per_device_eval_batch_size)
+        batch_size = (self.config.training.per_device_train_batch_size if is_training 
+                     else self.config.training.per_device_eval_batch_size)
         
         data_loader = DataLoader(
             dataset,
             batch_size=batch_size,
             shuffle=is_training,
-            num_workers=self.config.dataloader_num_workers,
-            pin_memory=True,
-            drop_last=is_training
+            num_workers=self.config.training.dataloader_num_workers,
+            pin_memory=self.config.training.dataloader_pin_memory,
+            drop_last=self.config.training.dataloader_drop_last if is_training else False
         )
         
         return data_loader
@@ -261,10 +239,10 @@ class CPTTrainer:
             loss.backward()
             
             # 梯度裁剪
-            if self.config.max_grad_norm > 0:
+            if self.config.training.max_grad_norm > 0:
                 torch.nn.utils.clip_grad_norm_(
                     self.model.parameters(), 
-                    self.config.max_grad_norm
+                    self.config.training.max_grad_norm
                 )
             
             # 优化器步骤
@@ -281,7 +259,7 @@ class CPTTrainer:
             })
             
             # 定期记录日志
-            if self.global_step % self.config.logging_steps == 0:
+            if self.global_step % self.config.training.logging_steps == 0:
                 self.logger.info(
                     f"Step {self.global_step}, Loss: {loss.item():.4f}, "
                     f"Avg Loss: {total_loss / (step + 1):.4f}"
@@ -325,8 +303,7 @@ class CPTTrainer:
         
         # 保存配置
         config_path = os.path.join(save_path, "cpt_config.json")
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(self.config.__dict__, f, indent=2, ensure_ascii=False)
+        self.config.save_to_file(config_path)
         
         self.logger.info(f"模型已保存到: {save_path}")
     
@@ -350,22 +327,40 @@ class CPTTrainer:
             eval_loader = self.create_data_loader(eval_dataset, is_training=False)
         
         # 创建学习率调度器
-        total_steps = len(train_loader) * self.config.num_train_epochs
-        warmup_steps = int(total_steps * self.config.warmup_ratio)
+        total_steps = len(train_loader) * self.config.training.num_train_epochs
+        warmup_steps = int(total_steps * self.config.training.warmup_ratio) if self.config.training.warmup_ratio > 0 else self.config.training.warmup_steps
         
-        scheduler = torch.optim.lr_scheduler.LinearLR(
-            self.optimizer,
-            start_factor=0.1,
-            end_factor=1.0,
-            total_iters=warmup_steps
-        )
+        if self.config.training.lr_scheduler_type == "linear":
+            scheduler = torch.optim.lr_scheduler.LinearLR(
+                self.optimizer,
+                start_factor=0.1,
+                end_factor=1.0,
+                total_iters=warmup_steps
+            )
+        elif self.config.training.lr_scheduler_type == "cosine":
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer,
+                T_max=total_steps - warmup_steps
+            )
+        elif self.config.training.lr_scheduler_type == "constant":
+            scheduler = torch.optim.lr_scheduler.ConstantLR(
+                self.optimizer,
+                factor=1.0
+            )
+        else:
+            scheduler = torch.optim.lr_scheduler.LinearLR(
+                self.optimizer,
+                start_factor=0.1,
+                end_factor=1.0,
+                total_iters=warmup_steps
+            )
         
         # 训练循环
         best_loss = float('inf')
         
-        for epoch in range(self.config.num_train_epochs):
+        for epoch in range(self.config.training.num_train_epochs):
             self.epoch = epoch
-            self.logger.info(f"开始训练 Epoch {epoch + 1}/{self.config.num_train_epochs}")
+            self.logger.info(f"开始训练 Epoch {epoch + 1}/{self.config.training.num_train_epochs}")
             
             # 训练
             train_loss = self.train_epoch(train_loader)
@@ -378,20 +373,20 @@ class CPTTrainer:
                 # 保存最佳模型
                 if eval_loss < best_loss:
                     best_loss = eval_loss
-                    self.save_model(os.path.join(self.config.output_dir, "best_model"))
+                    self.save_model(os.path.join(self.config.training.output_dir, "best_model"))
             else:
                 self.logger.info(f"Epoch {epoch + 1} - Train Loss: {train_loss:.4f}")
             
             # 定期保存检查点
             if (epoch + 1) % 1 == 0:  # 每个epoch保存一次
-                checkpoint_path = os.path.join(self.config.output_dir, f"checkpoint-epoch-{epoch + 1}")
+                checkpoint_path = os.path.join(self.config.training.output_dir, f"checkpoint-epoch-{epoch + 1}")
                 self.save_model(checkpoint_path)
             
             # 更新学习率
             scheduler.step()
         
         # 保存最终模型
-        final_model_path = os.path.join(self.config.output_dir, "final_model")
+        final_model_path = os.path.join(self.config.training.output_dir, "final_model")
         self.save_model(final_model_path)
         
         self.logger.info("训练完成！")
@@ -400,46 +395,51 @@ class CPTTrainer:
 
 # 使用示例
 def main():
-    """使用示例"""
-    # 创建配置
-    config = CPTConfig(
-        model_name_or_path="Qwen/Qwen2.5-7B",
-        max_length=2048,
-        learning_rate=5e-5,
-        num_train_epochs=3,
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=8,
-        use_muon_optimizer=True,
-        use_flash_attention=True,
-        use_gradient_checkpointing=True,
-        use_bf16=True,
-        output_dir="./cpt_output",
-        max_samples=1000  # 限制样本数量用于测试
-    )
+    """主函数"""
+    import argparse
     
-    # 创建训练器
+    parser = argparse.ArgumentParser(description="继续预训练脚本")
+    parser.add_argument("--config", type=str, default="configs/cpt_config.json", help="配置文件路径")
+    parser.add_argument("--train_data", type=str, required=True, help="训练数据路径")
+    parser.add_argument("--eval_data", type=str, help="评估数据路径")
+    parser.add_argument("--model_name_or_path", type=str, help="模型路径，覆盖配置文件中的设置")
+    parser.add_argument("--output_dir", type=str, help="输出目录，覆盖配置文件中的设置")
+    parser.add_argument("--learning_rate", type=float, help="学习率，覆盖配置文件中的设置")
+    parser.add_argument("--batch_size", type=int, help="批大小，覆盖配置文件中的设置")
+    parser.add_argument("--num_train_epochs", type=int, help="训练轮数，覆盖配置文件中的设置")
+    parser.add_argument("--max_length", type=int, help="最大序列长度，覆盖配置文件中的设置")
+    
+    args = parser.parse_args()
+    
+    # 加载配置
+    config = CPTConfigClass.from_file(args.config)
+    
+    # 覆盖配置
+    if args.model_name_or_path:
+        config.model.model_name_or_path = args.model_name_or_path
+    if args.output_dir:
+        config.training.output_dir = args.output_dir
+    if args.learning_rate:
+        config.training.learning_rate = args.learning_rate
+    if args.batch_size:
+        config.training.per_device_train_batch_size = args.batch_size
+    if args.num_train_epochs:
+        config.training.num_train_epochs = args.num_train_epochs
+    if args.max_length:
+        config.model.max_length = args.max_length
+    
+    # 加载数据
+    with open(args.train_data, 'r', encoding='utf-8') as f:
+        train_texts = [line.strip() for line in f if line.strip()]
+    
+    eval_texts = None
+    if args.eval_data:
+        with open(args.eval_data, 'r', encoding='utf-8') as f:
+            eval_texts = [line.strip() for line in f if line.strip()]
+    
+    # 创建训练器并开始训练
     trainer = CPTTrainer(config)
-    
-    # 准备训练数据（示例）
-    train_texts = [
-        "这是一个用于继续预训练的文本样本。",
-        "Qwen2.5是一个强大的大语言模型。",
-        "继续预训练可以提升模型在特定领域的性能。",
-        # ... 更多训练文本
-    ]
-    
-    # 准备评估数据（可选）
-    eval_texts = [
-        "这是用于评估的文本样本。",
-        "模型性能评估很重要。",
-    ]
-    
-    # 开始训练
-    try:
-        final_loss = trainer.train(train_texts, eval_texts)
-        print(f"训练完成，最终损失: {final_loss:.4f}")
-    except Exception as e:
-        print(f"训练过程中出现错误: {e}")
+    trainer.train(train_texts, eval_texts)
 
 
 if __name__ == "__main__":

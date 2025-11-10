@@ -1,19 +1,9 @@
 import yaml  
 from pathlib import Path  
-from dataclasses import dataclass, field, fields, asdict
-import os
-
-def load_config(config_path: str) -> dict:  
-    with open(config_path, 'r', encoding='utf-8') as f:  
-        return yaml.safe_load(f)  
-
-# 加载配置  
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-MODEL_CONFIG = load_config(BASE_DIR / 'configs' / 'model_config.yaml')  
-TRAIN_CONFIG = load_config(BASE_DIR / 'configs' / 'train_config.yaml')  
-DPO_CONFIG = load_config(BASE_DIR / 'configs' / 'dpo_config.yaml')
-
+from dataclasses import dataclass, field, fields, asdict, is_dataclass
+from pydantic import BaseModel
+import os, sys
+from pathlib import Path
 
 
 
@@ -73,65 +63,6 @@ PDF_FOLDER_PATH = "src/agents/travel_knowledge/tour_pdfs"
 PAGE_FOLDER_PATH = "src/agents/travel_knowledge/tour_pages"
 
 
-
-
-@dataclass
-class ModelConfig:
-    pass
-
-
-
-@dataclass
-class EmbeddingConfig:
-    pass
-
-
-
-@dataclass
-class RewardModelConfig:
-    pass
-
-
-
-@dataclass
-class TrainingConfig:
-    pass
-
-
-
-
-@dataclass
-class SFTConfig:
-    pass
-
-
-
-
-@dataclass
-class PPOConfig:
-    pass
-
-
-@dataclass
-class DPOConfig:
-    pass
-
-
-
-
-@dataclass 
-class GRPOConfig:
-    pass
-
-
-
-
-
-@dataclass
-class KBConfig:
-    '''
-    知识库配置
-    '''
 
 
 

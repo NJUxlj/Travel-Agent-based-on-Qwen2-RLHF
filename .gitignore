@@ -25,3 +25,6 @@ src/data/MultiTurn_GRPO
 model_weights/
 outputs/
 output/
+
+
+.env

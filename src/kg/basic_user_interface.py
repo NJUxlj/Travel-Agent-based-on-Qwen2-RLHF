@@ -47,6 +47,10 @@ from knowledge_graph import *
 from knowledge_graph_querying import *
 from initial_card_processing import *
 
+
+from dotenv import load_dotenv
+load_dotenv()
+
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
