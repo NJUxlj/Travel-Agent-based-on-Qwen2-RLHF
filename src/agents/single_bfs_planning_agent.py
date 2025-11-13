@@ -1,39 +1,36 @@
-
-from src.agents.prompt_template import MyPromptTemplate
-from src.agents.tools import ToolDispatcher
+from src.tools.prompt_template import MyPromptTemplate
+from src.tools.tool_executor import ToolDispatcher
 from typing import Dict, List, Optional, Tuple
-# from src.models.model import TravelAgent
 from src.data.data_processor import CrossWOZProcessor
+import asyncio
+import os
+from dataclasses import dataclass
+from typing import Any, Literal
+from uuid import uuid4
 
+from typing_extensions import Never
 
-
-import langchain
-from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain
-from langchain.chains.conversational_retrieval.base import ChatVectorDBChain
-from langchain.chains.llm import LLMChain
-  
-from langchain.memory.buffer import ConversationBufferMemory  
-from langchain_community.vectorstores.chroma import Chroma      # pip install langchain-chroma  pip install langchain_community
-from langchain_core.prompts import ChatPromptTemplate  
-from langchain_core.runnables import RunnablePassthrough  
-from langchain_core.output_parsers import StrOutputParser  
-from langchain_community.embeddings.huggingface import HuggingFaceEmbeddings  
-from langchain_core.prompts import PromptTemplate
-
-from langchain_community.llms.tongyi import Tongyi
-from langchain_community.llms.openai import OpenAI
-from langchain_community.embeddings.openai import OpenAIEmbeddings
-
-from langchain_community.document_loaders.pdf import PyPDFLoader
-
+from agent_framework import (
+    AgentExecutor,
+    AgentExecutorRequest,
+    AgentExecutorResponse,
+    ChatMessage,
+    Role,
+    WorkflowBuilder,
+    WorkflowContext,
+    executor,
+    Case,
+    Default,
+)
 
 
 from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationMixin
-
-
-
 from typing import Dict, List, Optional, Tuple, Literal
 
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 '''
 建议检查Pydantic版本兼容性，推荐使用：
@@ -44,12 +41,10 @@ pip install pydantic>=2.5.0
 
 from datasets import load_dataset
 import chromadb
-from chromadb.utils.embedding_functions import EmbeddingFunction  
+from chromadb.utils.embedding_functions import EmbeddingFunction    # pyright: ignore[reportMissingImports]
 import re
 import os
 import torch
-from zhipuai import ZhipuAI 
-
 from src.configs.config import RAG_DATA_PATH, SFT_MODEL_PATH, EMBEDDING_MODEL_PATH
 
 
