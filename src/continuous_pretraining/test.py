@@ -10,10 +10,10 @@ import tempfile
 from pathlib import Path
 
 # 添加项目根目录到Python路径
-project_root = Path(__file__).resolve().parent.parent.parent
+project_root = Path(__file__).resolve().parent.parent
 sys.path.append(str(project_root))
 
-from src.configs.cpt_config import CPTConfig
+from configs.cpt_config import CPTConfig
 
 
 def test_config():

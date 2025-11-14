@@ -22,6 +22,9 @@ from transformers import (
 )
 
 # 导入配置类
+from pathlib import Path
+import sys, os
+sys.path.append(Path(__file__).parent.parent)
 from configs.cpt_config import CPTConfig as CPTConfigClass
 
 # 尝试导入Muon优化器，如果不可用则使用AdamW作为备选
@@ -110,7 +113,7 @@ class CPTTrainer:
         self.logger.info(f"正在加载模型: {self.config.model.model_name_or_path}")
         
         # 加载分词器
-        self.tokenizer = AutoTokenizer.from_pretrained(
+        self.tokenizerz: AutoTokenizer = AutoTokenizer.from_pretrained(
             self.config.model.model_name_or_path,
             trust_remote_code=self.config.model.trust_remote_code,
             cache_dir=self.config.model.cache_dir,
