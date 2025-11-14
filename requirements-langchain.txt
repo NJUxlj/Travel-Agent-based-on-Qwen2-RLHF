@@ -1,0 +1,12 @@
+# LangChain 相关依赖
+langchain>=0.1.0
+langchain-huggingface>=0.0.1
+langchain-text-splitters>=0.1.0
+langchain-core>=0.1.0
+sentence-transformers>=2.2.0
+transformers>=4.30.0
+torch>=2.0.0
+
+# 可选：如果需要向量数据库支持
+# langchain-community>=0.0.1
+# faiss-cpu>=1.7.0  # 或者 faiss-gpu 如果有GPU
